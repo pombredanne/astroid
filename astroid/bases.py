@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2009-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """This module contains base classes and functions for the nodes and some
 inference utils.
 """
@@ -22,10 +13,16 @@ inference utils.
 import collections
 import sys
 
+import six
+
 from astroid import context as contextmod
 from astroid import exceptions
 from astroid import util
 
+objectmodel = util.lazy_import('interpreter.objectmodel')
+BUILTINS = six.moves.builtins.__name__
+manager = util.lazy_import('manager')
+MANAGER = manager.AstroidManager()
 
 if sys.version_info >= (3, 0):
     BUILTINS = 'builtins'
@@ -125,22 +122,27 @@ def _infer_method_result_truth(instance, method_name, context):
     return util.Uninferable
 
 
-class Instance(Proxy):
-    """A special node representing a class instance."""
+class BaseInstance(Proxy):
+    """An instance base class, which provides lookup methods for potential instances."""
+
+    special_attributes = None
+
+    def display_type(self):
+        return 'Instance of'
 
     def getattr(self, name, context=None, lookupclass=True):
         try:
             values = self._proxied.instance_attr(name, context)
         except exceptions.AttributeInferenceError:
-            if name == '__class__':
-                return [self._proxied]
+            if self.special_attributes and name in self.special_attributes:
+                return [self.special_attributes.lookup(name)]
+
             if lookupclass:
                 # Class attributes not available through the instance
                 # unless they are explicitly defined.
-                if name in ('__name__', '__bases__', '__mro__', '__subclasses__'):
-                    return self._proxied.local_attr(name)
                 return self._proxied.getattr(name, context,
                                              class_context=False)
+
             util.reraise(exceptions.AttributeInferenceError(target=self,
                                                             attribute=name,
                                                             context=context))
@@ -172,8 +174,8 @@ class Instance(Proxy):
             try:
                 # fallback to class.igetattr since it has some logic to handle
                 # descriptors
-                for stmt in self._wrap_attr(self._proxied.igetattr(name, context),
-                                            context):
+                attrs = self._proxied.igetattr(name, context, class_context=False)
+                for stmt in self._wrap_attr(attrs, context):
                     yield stmt
             except exceptions.AttributeInferenceError as error:
                 util.reraise(exceptions.InferenceError(**vars(error)))
@@ -214,6 +216,13 @@ class Instance(Proxy):
             raise exceptions.InferenceError(node=self, caller=caller,
                                             context=context)
 
+
+class Instance(BaseInstance):
+    """A special node representing a class instance."""
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.InstanceModel())
+
     def __repr__(self):
         return '<Instance of %s.%s at 0x%s>' % (self._proxied.root().name,
                                                 self._proxied.name,
@@ -249,7 +258,8 @@ class Instance(Proxy):
              all its instances are considered true.
         """
         context = contextmod.InferenceContext()
-        context.callcontext = contextmod.CallContext(args=[self])
+        context.callcontext = contextmod.CallContext(args=[])
+        context.boundnode = self
 
         try:
             result = _infer_method_result_truth(self, BOOL_SPECIAL_METHOD, context)
@@ -267,9 +277,12 @@ class Instance(Proxy):
         pass
 
 
-
 class UnboundMethod(Proxy):
     """a special node representing a method not bound to an instance"""
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.UnboundMethodModel())
+
     def __repr__(self):
         frame = self._proxied.parent.frame()
         return '<%s %s of %s at 0x%s' % (self.__class__.__name__,
@@ -280,13 +293,13 @@ class UnboundMethod(Proxy):
         return False
 
     def getattr(self, name, context=None):
-        if name == 'im_func':
-            return [self._proxied]
+        if name in self.special_attributes:
+            return [self.special_attributes.lookup(name)]
         return self._proxied.getattr(name, context)
 
     def igetattr(self, name, context=None):
-        if name == 'im_func':
-            return iter((self._proxied,))
+        if name in self.special_attributes:
+            return iter((self.special_attributes.lookup(name), ))
         return self._proxied.igetattr(name, context)
 
     def infer_call_result(self, caller, context):
@@ -295,7 +308,7 @@ class UnboundMethod(Proxy):
         if (self._proxied.name == '__new__' and
                 self._proxied.parent.frame().qname() == '%s.object' % BUILTINS):
             infer = caller.args[0].infer() if caller.args else []
-            return ((x is util.Uninferable and x or Instance(x)) for x in infer)
+            return (Instance(x) if x is not util.Uninferable else x for x in infer)
         return self._proxied.infer_call_result(caller, context)
 
     def bool_value(self):
@@ -304,6 +317,10 @@ class UnboundMethod(Proxy):
 
 class BoundMethod(UnboundMethod):
     """a special node representing a method bound to an instance"""
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.BoundMethodModel())
+
     def __init__(self, proxy, bound):
         UnboundMethod.__init__(self, proxy)
         self.bound = bound
@@ -373,7 +390,7 @@ class BoundMethod(UnboundMethod):
                             parent=caller)
         empty = node_classes.Pass()
         cls.postinit(bases=bases.elts, body=[empty], decorators=[],
-                     newstyle=True, metaclass=mcs)
+                     newstyle=True, metaclass=mcs, keywords=[])
         cls.locals = cls_locals
         return cls
 
@@ -401,11 +418,19 @@ class BoundMethod(UnboundMethod):
         return True
 
 
-class Generator(Instance):
+class Generator(BaseInstance):
     """a special node representing a generator.
 
     Proxied class is set once for all in raw_building.
     """
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.GeneratorModel())
+
+    # pylint: disable=super-init-not-called
+    def __init__(self, parent=None):
+        self.parent = parent
+
     def callable(self):
         return False
 
@@ -423,4 +448,3 @@ class Generator(Instance):
 
     def __str__(self):
         return 'Generator(%s)' % (self._proxied.name)
-

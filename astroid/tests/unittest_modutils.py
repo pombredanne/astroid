@@ -1,20 +1,12 @@
-# copyright 2003-2014 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it under
-# the terms of the GNU Lesser General Public License as published by the Free
-# Software Foundation, either version 2.1 of the License, or (at your option) any
-# later version.
-#
-# astroid is distributed in the hope that it will be useful, but WITHOUT
-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-# FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more
-# details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid.  If not, see <http://www.gnu.org/licenses/>.
+# -*- coding: utf-8 -*-
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015 Florian Bruhin <me@the-compiler.org>
+# Copyright (c) 2015 Radosław Ganczarek <radoslaw@ganczarek.in>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """
 unit tests for module modutils (module manipulation utilities)
 """
@@ -25,6 +17,7 @@ import unittest
 from xml import etree
 
 import astroid
+from astroid.interpreter._import import spec
 from astroid import modutils
 from astroid.tests import resources
 
@@ -37,21 +30,25 @@ class ModuleFileTest(unittest.TestCase):
     package = "mypypa"
 
     def tearDown(self):
-        for k in list(sys.path_importer_cache.keys()):
+        for k in list(sys.path_importer_cache):
             if 'MyPyPa' in k:
                 del sys.path_importer_cache[k]
 
     def test_find_zipped_module(self):
-        mtype, mfile = modutils._module_file(
+        found_spec = spec.find_spec(
             [self.package], [resources.find('data/MyPyPa-0.1.0-py2.5.zip')])
-        self.assertEqual(mtype, modutils.PY_ZIPMODULE)
-        self.assertEqual(mfile.split(os.sep)[-3:], ["data", "MyPyPa-0.1.0-py2.5.zip", self.package])
+        self.assertEqual(found_spec.type,
+                         spec.ModuleType.PY_ZIPMODULE)
+        self.assertEqual(found_spec.location.split(os.sep)[-3:],
+                         ["data", "MyPyPa-0.1.0-py2.5.zip", self.package])
 
     def test_find_egg_module(self):
-        mtype, mfile = modutils._module_file(
+        found_spec = spec.find_spec(
             [self.package], [resources.find('data/MyPyPa-0.1.0-py2.5.egg')])
-        self.assertEqual(mtype, modutils.PY_ZIPMODULE)
-        self.assertEqual(mfile.split(os.sep)[-3:], ["data", "MyPyPa-0.1.0-py2.5.egg", self.package])
+        self.assertEqual(found_spec.type,
+                         spec.ModuleType.PY_ZIPMODULE)
+        self.assertEqual(found_spec.location.split(os.sep)[-3:],
+                         ["data", "MyPyPa-0.1.0-py2.5.egg", self.package])
 
 
 class LoadModuleFromNameTest(unittest.TestCase):

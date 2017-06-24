@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014-2015 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """tests for the astroid builder and rebuilder module"""
 
 import os
@@ -332,8 +323,8 @@ class BuilderTest(unittest.TestCase):
     @test_utils.require_version(maxver='3.0')
     def test_inspect_build_instance(self):
         """test astroid tree build from a living object"""
-        import exceptions # pylint: disable=redefined-outer-name
-        builtin_ast = self.builder.inspect_build(exceptions)
+        import exceptions as builtin_exceptions
+        builtin_ast = self.builder.inspect_build(builtin_exceptions)
         fclass = builtin_ast['OSError']
         # things like OSError.strerror are now (2.5) data descriptors on the
         # class instead of entries in the __dict__ of an instance
@@ -379,6 +370,9 @@ class BuilderTest(unittest.TestCase):
         datap = resources.build_file('data/__init__.py', 'data.__init__')
         self.assertEqual(datap.name, 'data')
         self.assertEqual(datap.package, 1)
+        datap = resources.build_file('data/tmp__init__.py', 'data.tmp__init__')
+        self.assertEqual(datap.name, 'data.tmp__init__')
+        self.assertEqual(datap.package, 0)
 
     def test_yield_parent(self):
         """check if we added discard nodes as yield parent (w/ compiler)"""
@@ -388,7 +382,7 @@ class BuilderTest(unittest.TestCase):
                 if noe:
                     yield more
         """
-        func = test_utils.extract_node(code)
+        func = builder.extract_node(code)
         self.assertIsInstance(func, nodes.FunctionDef)
         stmt = func.body[0]
         self.assertIsInstance(stmt, nodes.Expr)
@@ -570,7 +564,7 @@ class BuilderTest(unittest.TestCase):
         self.assertEqual(chain.value, 'None')
 
     def test_not_implemented(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         NotImplemented #@
         ''')
         inferred = next(node.infer())
@@ -759,13 +753,13 @@ class TestGuessEncoding(unittest.TestCase):
         self.assertIsNone(e)
 
     def test_wrong_coding(self):
-        # setting "coding" varaible
+        # setting "coding" variable
         e = self.guess_encoding("coding = UTF-8")
         self.assertIsNone(e)
-        # setting a dictionnary entry
+        # setting a dictionary entry
         e = self.guess_encoding("coding:UTF-8")
         self.assertIsNone(e)
-        # setting an arguement
+        # setting an argument
         e = self.guess_encoding("def do_something(a_word_with_coding=None):")
         self.assertIsNone(e)
 

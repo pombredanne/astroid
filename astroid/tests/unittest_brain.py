@@ -1,19 +1,13 @@
-# Copyright 2013 Google Inc. All Rights Reserved.
-#
-# This file is part of astroid.
-#
-# logilab-astng is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# logilab-astng is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with logilab-astng. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2013-2014 Google, Inc.
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015 Philip Lorenz <philip@bithub.de>
+# Copyright (c) 2015 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2015 raylu <lurayl@gmail.com>
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """Tests for basic functionality in astroid.brain."""
 try:
     import multiprocessing # pylint: disable=unused-import
@@ -52,7 +46,7 @@ except ImportError:
     HAS_NUMPY = False
 
 try:
-    import pytest # pylint: disable=unused-import
+    import pytest
     HAS_PYTEST = True
 except ImportError:
     HAS_PYTEST = False
@@ -62,8 +56,8 @@ from astroid import MANAGER
 from astroid import bases
 from astroid import builder
 from astroid import nodes
-from astroid import test_utils
 from astroid import util
+from astroid import test_utils
 import astroid
 
 
@@ -88,7 +82,7 @@ class HashlibTest(unittest.TestCase):
 class NamedTupleTest(unittest.TestCase):
 
     def test_namedtuple_base(self):
-        klass = test_utils.extract_node("""
+        klass = builder.extract_node("""
         from collections import namedtuple
 
         class X(namedtuple("X", ["a", "b", "c"])):
@@ -101,7 +95,7 @@ class NamedTupleTest(unittest.TestCase):
             self.assertFalse(anc.parent is None)
 
     def test_namedtuple_inference(self):
-        klass = test_utils.extract_node("""
+        klass = builder.extract_node("""
         from collections import namedtuple
 
         name = "X"
@@ -114,7 +108,7 @@ class NamedTupleTest(unittest.TestCase):
         self.assertSetEqual({"a", "b", "c"}, set(base.instance_attrs))
 
     def test_namedtuple_inference_failure(self):
-        klass = test_utils.extract_node("""
+        klass = builder.extract_node("""
         from collections import namedtuple
 
         def foo(fields):
@@ -125,21 +119,21 @@ class NamedTupleTest(unittest.TestCase):
     def test_namedtuple_advanced_inference(self):
         # urlparse return an object of class ParseResult, which has a
         # namedtuple call and a mixin as base classes
-        result = test_utils.extract_node("""
+        result = builder.extract_node("""
         import six
 
         result = __(six.moves.urllib.parse.urlparse('gopher://'))
         """)
         instance = next(result.infer())
-        self.assertEqual(len(instance.getattr('scheme')), 1)
-        self.assertEqual(len(instance.getattr('port')), 1)
+        self.assertGreaterEqual(len(instance.getattr('scheme')), 1)
+        self.assertGreaterEqual(len(instance.getattr('port')), 1)
         with self.assertRaises(astroid.AttributeInferenceError):
             instance.getattr('foo')
-        self.assertEqual(len(instance.getattr('geturl')), 1)
+        self.assertGreaterEqual(len(instance.getattr('geturl')), 1)
         self.assertEqual(instance.name, 'ParseResult')
 
     def test_namedtuple_instance_attrs(self):
-        result = test_utils.extract_node('''
+        result = builder.extract_node('''
         from collections import namedtuple
         namedtuple('a', 'a b c')(1, 2, 3) #@
         ''')
@@ -148,11 +142,66 @@ class NamedTupleTest(unittest.TestCase):
             self.assertEqual(attr[0].attrname, name)
 
     def test_namedtuple_uninferable_fields(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         x = [A] * 2
         from collections import namedtuple
         l = namedtuple('a', x)
         l(1)
+        ''')
+        inferred = next(node.infer())
+        self.assertIs(util.Uninferable, inferred)
+
+    def test_namedtuple_access_class_fields(self):
+        node = builder.extract_node("""
+        from collections import namedtuple
+        Tuple = namedtuple("Tuple", "field other")
+        Tuple #@
+        """)
+        inferred = next(node.infer())
+        self.assertIn('field', inferred.locals)
+        self.assertIn('other', inferred.locals)
+
+    def test_namedtuple_rename_keywords(self):
+        node = builder.extract_node("""
+        from collections import namedtuple
+        Tuple = namedtuple("Tuple", "abc def", rename=True)
+        Tuple #@
+        """)
+        inferred = next(node.infer())
+        self.assertIn('abc', inferred.locals)
+        self.assertIn('_1', inferred.locals)
+
+    def test_namedtuple_rename_duplicates(self):
+        node = builder.extract_node("""
+        from collections import namedtuple
+        Tuple = namedtuple("Tuple", "abc abc abc", rename=True)
+        Tuple #@
+        """)
+        inferred = next(node.infer())
+        self.assertIn('abc', inferred.locals)
+        self.assertIn('_1', inferred.locals)
+        self.assertIn('_2', inferred.locals)
+
+    def test_namedtuple_rename_uninferable(self):
+        node = builder.extract_node("""
+        from collections import namedtuple
+        Tuple = namedtuple("Tuple", "a b c", rename=UNINFERABLE)
+        Tuple #@
+        """)
+        inferred = next(node.infer())
+        self.assertIn('a', inferred.locals)
+        self.assertIn('b', inferred.locals)
+        self.assertIn('c', inferred.locals)
+
+
+class DefaultDictTest(unittest.TestCase):
+
+    def test_1(self):
+        node = builder.extract_node('''
+        from collections import defaultdict
+
+        X = defaultdict(int)
+        X[0]
         ''')
         inferred = next(node.infer())
         self.assertIs(util.Uninferable, inferred)
@@ -170,7 +219,7 @@ class ModuleExtenderTest(unittest.TestCase):
 class NoseBrainTest(unittest.TestCase):
 
     def test_nose_tools(self):
-        methods = test_utils.extract_node("""
+        methods = builder.extract_node("""
         from nose.tools import assert_equal
         from nose.tools import assert_equals
         from nose.tools import assert_true
@@ -196,7 +245,7 @@ class NoseBrainTest(unittest.TestCase):
 class SixBrainTest(unittest.TestCase):
 
     def test_attribute_access(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         import six
         six.moves.http_client #@
         six.moves.urllib_parse #@
@@ -266,7 +315,7 @@ class SixBrainTest(unittest.TestCase):
             self.assertEqual(urlretrieve.qname(), 'urllib.request.urlretrieve')
 
     def test_from_imports(self):
-        ast_node = test_utils.extract_node('''
+        ast_node = builder.extract_node('''
         from six.moves import http_client
         http_client.HTTPSConnection #@
         ''')
@@ -289,7 +338,7 @@ class MultiprocessingBrainTest(unittest.TestCase):
         # Test that module attributes are working,
         # especially on Python 3.4+, where they are obtained
         # from a context.
-        module = test_utils.extract_node("""
+        module = builder.extract_node("""
         import multiprocessing
         """)
         module = module.do_import_module('multiprocessing')
@@ -300,7 +349,7 @@ class MultiprocessingBrainTest(unittest.TestCase):
             self.assertIsInstance(cpu_count, astroid.BoundMethod)
 
     def test_module_name(self):
-        module = test_utils.extract_node("""
+        module = builder.extract_node("""
         import multiprocessing
         multiprocessing.SyncManager()
         """)
@@ -366,20 +415,33 @@ class MultiprocessingBrainTest(unittest.TestCase):
         self.assertTrue(manager.getattr('start'))
         self.assertTrue(manager.getattr('shutdown'))
 
-class ThreadingBrainTest(unittest.TestCase):
 
-    def test_threading(self):
-        module = test_utils.extract_node("""
+class ThreadingBrainTest(unittest.TestCase):
+    def test_lock(self):
+        self._test_lock_object('Lock')
+
+    def test_rlock(self):
+        self._test_lock_object('RLock')
+
+    def test_semaphore(self):
+        self._test_lock_object('Semaphore')
+
+    def test_boundedsemaphore(self):
+        self._test_lock_object('BoundedSemaphore')
+
+    def _test_lock_object(self, object_name):
+        lock_instance = builder.extract_node("""
         import threading
-        threading.Lock()
-        """)
-        inferred = next(module.infer())
+        threading.{0}()
+        """.format(object_name))
+        inferred = next(lock_instance.infer())
+        self.assert_is_valid_lock(inferred)
+
+    def assert_is_valid_lock(self, inferred):
         self.assertIsInstance(inferred, astroid.Instance)
         self.assertEqual(inferred.root().name, 'threading')
-        self.assertIsInstance(inferred.getattr('acquire')[0],
-                              astroid.FunctionDef)
-        self.assertIsInstance(inferred.getattr('release')[0],
-                              astroid.FunctionDef)
+        for method in {'acquire', 'release', '__enter__', '__exit__'}:
+            self.assertIsInstance(next(inferred.igetattr(method)), astroid.BoundMethod)
 
 
 @unittest.skipUnless(HAS_ENUM,
@@ -459,7 +521,7 @@ class EnumBrainTest(unittest.TestCase):
                         'IntEnum based enums should be a subtype of int')
 
     def test_enum_func_form_is_class_not_instance(self):
-        cls, instance = test_utils.extract_node('''
+        cls, instance = builder.extract_node('''
         from enum import Enum
         f = Enum('Audience', ['a', 'b', 'c'])
         f #@
@@ -488,7 +550,7 @@ class DateutilBrainTest(unittest.TestCase):
 class NumpyBrainTest(unittest.TestCase):
 
     def test_numpy(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         import numpy
         numpy.ones #@
         ''')
@@ -500,16 +562,136 @@ class NumpyBrainTest(unittest.TestCase):
 class PytestBrainTest(unittest.TestCase):
 
     def test_pytest(self):
-        ast_node = test_utils.extract_node('''
+        ast_node = builder.extract_node('''
         import pytest
         pytest #@
         ''')
         module = next(ast_node.infer())
-        self.assertIn('deprecated_call', module)
-        self.assertIn('exit', module)
-        self.assertIn('fail', module)
-        self.assertIn('fixture', module)
-        self.assertIn('mark', module)
+        attrs = ['deprecated_call', 'warns', 'exit', 'fail', 'skip',
+                 'importorskip', 'xfail', 'mark', 'raises', 'freeze_includes',
+                 'set_trace', 'fixture', 'yield_fixture']
+        if pytest.__version__.split('.')[0] == '3':
+            attrs += ['approx', 'register_assert_rewrite']
+
+        for attr in attrs:
+            self.assertIn(attr, module)
+
+
+class IOBrainTest(unittest.TestCase):
+
+    @unittest.skipUnless(six.PY3, 'Needs Python 3 io model')
+    def test_sys_streams(self):
+        for name in {'stdout', 'stderr', 'stdin'}:
+            node = astroid.extract_node('''
+            import sys
+            sys.{}
+            '''.format(name))
+            inferred = next(node.infer())
+            buffer_attr = next(inferred.igetattr('buffer'))
+            self.assertIsInstance(buffer_attr, astroid.Instance)
+            self.assertEqual(buffer_attr.name, 'BufferedWriter')
+            raw = next(buffer_attr.igetattr('raw'))
+            self.assertIsInstance(raw, astroid.Instance)
+            self.assertEqual(raw.name, 'FileIO')
+
+
+@test_utils.require_version('3.6')
+class TypingBrain(unittest.TestCase):
+
+    def test_namedtuple_base(self):
+        klass = builder.extract_node("""
+        from typing import NamedTuple
+
+        class X(NamedTuple("X", [("a", int), ("b", str), ("c", bytes)])):
+           pass
+        """)
+        self.assertEqual(
+            [anc.name for anc in klass.ancestors()],
+            ['X', 'tuple', 'object'])
+        for anc in klass.ancestors():
+            self.assertFalse(anc.parent is None)
+
+    def test_namedtuple_inference(self):
+        klass = builder.extract_node("""
+        from typing import NamedTuple
+
+        class X(NamedTuple("X", [("a", int), ("b", str), ("c", bytes)])):
+           pass
+        """)
+        base = next(base for base in klass.ancestors()
+                    if base.name == 'X')
+        self.assertSetEqual({"a", "b", "c"}, set(base.instance_attrs))
+
+    def test_namedtuple_inference_nonliteral(self):
+        # Note: NamedTuples in mypy only work with literals.
+        klass = builder.extract_node("""
+        from typing import NamedTuple
+
+        name = "X"
+        fields = [("a", int), ("b", str), ("c", bytes)]
+        NamedTuple(name, fields)
+        """)
+        inferred = next(klass.infer())
+        self.assertIsInstance(inferred, astroid.Instance)
+        self.assertEqual(inferred.qname(), "typing.NamedTuple")
+
+    def test_namedtuple_instance_attrs(self):
+        result = builder.extract_node('''
+        from typing import NamedTuple
+        NamedTuple("A", [("a", int), ("b", str), ("c", bytes)])(1, 2, 3) #@
+        ''')
+        inferred = next(result.infer())
+        for name, attr in inferred.instance_attrs.items():
+            self.assertEqual(attr[0].attrname, name)
+
+    def test_namedtuple_simple(self):
+        result = builder.extract_node('''
+        from typing import NamedTuple
+        NamedTuple("A", [("a", int), ("b", str), ("c", bytes)])
+        ''')
+        inferred = next(result.infer())
+        self.assertIsInstance(inferred, nodes.ClassDef)
+        self.assertSetEqual({"a", "b", "c"}, set(inferred.instance_attrs))
+
+    def test_namedtuple_few_args(self):
+        result = builder.extract_node('''
+        from typing import NamedTuple
+        NamedTuple("A")
+        ''')
+        inferred = next(result.infer())
+        self.assertIsInstance(inferred, astroid.Instance)
+        self.assertEqual(inferred.qname(), "typing.NamedTuple")
+
+    def test_namedtuple_few_fields(self):
+        result = builder.extract_node('''
+        from typing import NamedTuple
+        NamedTuple("A", [("a",), ("b", str), ("c", bytes)])
+        ''')
+        inferred = next(result.infer())
+        self.assertIsInstance(inferred, astroid.Instance)
+        self.assertEqual(inferred.qname(), "typing.NamedTuple")
+
+    def test_namedtuple_class_form(self):
+        result = builder.extract_node('''
+        from typing import NamedTuple
+
+        class Example(NamedTuple):
+            mything: int
+
+        Example(mything=1)
+        ''')
+        inferred = next(result.infer())
+        self.assertIsInstance(inferred, astroid.Instance)
+
+
+class ReBrainTest(unittest.TestCase):
+    def test_regex_flags(self):
+        import re
+        names = [name for name in dir(re) if name.isupper()]
+        re_ast = MANAGER.ast_from_module_name('re')
+        for name in names:
+            self.assertIn(name, re_ast)
+            self.assertEqual(next(re_ast[name].infer()).value, getattr(re, name))
 
 
 if __name__ == '__main__':

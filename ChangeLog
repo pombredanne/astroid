@@ -1,7 +1,121 @@
 Change log for the astroid package (used to be astng)
 =====================================================
 
---
+2017-06-03 -- 1.5.3
+
+    * enum34 dependency is forced to be at least version 1.1.3. Fixes spurious
+    bug related to enum classes being falsy in boolean context, which caused
+    _Inconsistent Hierarchy_ `RuntimeError` in `singledispatch` module.
+
+    See links below for details:
+    - http://bugs.python.org/issue26748
+    - https://bitbucket.org/ambv/singledispatch/issues/8/inconsistent-hierarchy-with-enum
+    - https://bitbucket.org/stoneleaf/enum34/commits/da50803651ab644e6fce66ebc85562f1117c344b
+
+    * Do not raise an exception when uninferable value is unpacked in ``with`` statement.
+
+    * Lock objects from ``threading`` module are now correctly recognised
+      as context managers.
+
+2017-04-17 -- 1.5.2
+
+   * Basic support for the class form of typing.NamedTuple
+
+   * mro() can be computed for classes with old style classes in the hierarchy
+
+
+2017-04-13 -- 1.5.0
+
+    * Arguments node gained a new attribute, ``kwonlyargs_annotations``
+
+      This new attribute holds the annotations for the keyword-only
+      arguments.
+      
+    * `namedtuple` inference now understands `rename` keyword argument
+
+    * Classes can now know their definition-time arguments.
+
+      Classes can support keyword arguments, which are passed when
+      a class is constructed using ``__new__``.
+
+    * Add support for inferring typing.NamedTuple.
+
+    * ClassDef now supports __getitem__ inference through the metaclass.
+
+    * getitem() method accepts nodes now, instead of Python objects.
+
+    * Add support for explicit namespace packages, created with pkg_resources.
+
+    * Add brain tips for _io.TextIOWrapper's buffer and raw attributes.
+
+    * Add `returns` into the proper order in FunctionDef._astroid_fields
+
+      The order is important, since it determines the last child,
+      which in turn determines the last line number of a scoped node.
+
+    * Add brain tips for functools.lru_cache.
+
+    * New function, astroid.extract_node, exported out from astroid.test_utils.
+
+    * Stop saving assignment locals in ExceptHandlers, when the context is a store.
+
+      This fixes a tripping case, where the RHS of a ExceptHandler can be redefined
+      by the LHS, leading to a local save. For instance, ``except KeyError, exceptions.IndexError``
+      could result in a local save for IndexError as KeyError, resulting in potential unexpected
+      inferences. Since we don't lose a lot, this syntax gets prohibited.
+
+    * Fix a crash which occurred when the class of a namedtuple could not be inferred.
+
+    * Add support for implicit namespace packages (PEP 420)
+
+      This change involves a couple of modifications. First, we're relying on a
+      spec finder protocol, inspired by importlib's ModuleSpec, for finding where
+      a file or package is, using importlib's PathFinder as well, which enable
+      us to discover namespace packages as well.
+      This discovery is the center piece of the namespace package support,
+      the other part being the construction of a dummy Module node whenever
+      a namespace package root directory is requested during astroid's import
+      references.
+
+    * Introduce a special attributes model
+
+      Through this model, astroid starts knowing special attributes of certain Python objects,
+      such as functions, classes, super objects and so on. This was previously possible before,
+      but now the lookup and the attributes themselves are separated into a new module,
+      objectmodel.py, which describes, in a more comprehensive way, the data model of each
+      object.
+
+    * Exceptions have their own object model
+
+      Some of exceptions's attributes, such as .args and .message,
+      can't be inferred correctly since they are descriptors that get
+      transformed into the proper objects at runtime. This can cause issues
+      with the static analysis, since they are inferred as different than
+      what's expected. Now when we're creating instances of exceptions,
+      we're inferring a special object that knows how to transform those
+      runtime attributes into the proper objects via a custom object model.
+      Closes issue #81
+
+    * dict.values, dict.keys and dict.items are properly
+      inferred to their corresponding type, which also
+      includes the proper containers for Python 3.
+
+    * Fix a crash which occurred when a method had a same name as a builtin object,
+      decorated at the same time by that builtin object ( a property for instance)
+
+    * The inference can handle the case where the attribute is accessed through a subclass
+      of a base class and the attribute is defined at the base class's level,
+      by taking in consideration a redefinition in the subclass.
+
+      This should fix https://github.com/PyCQA/pylint/issues/432
+
+    * Calling lambda methods (defined at class level) can be understood.
+
+    * Don't take in consideration invalid assignments, especially when __slots__
+      declaration forbids them.
+      
+      Close issue #332
+
     * Functional form of enums support accessing values through __call__.
 
     * Brain tips for the ssl library.
@@ -45,7 +159,7 @@ Change log for the astroid package (used to be astng)
       from an extension module).
 
     * pkg_resources brain tips are a bit more specific,
-      by specifiying proper returns.
+      by specifying proper returns.
 
     * The slots() method conflates all the slots from the ancestors
       into a list of current and parent slots.
@@ -85,7 +199,18 @@ Change log for the astroid package (used to be astng)
       assumptions about what could be passed to other implementations,
       leading to various possible crashes when one or more arguments
       weren't given. Closes issue #277.
-    
+
+    * Fix metaclass detection, when multiple keyword arguments
+      are used in class definition.
+
+    * Add support for annotated variable assignments (PEP 526)
+
+    * Starred expressions are now inferred correctly for tuple,
+      list, set, and dictionary literals.
+
+    * Support for asynchronous comprehensions introduced in Python 3.6.
+
+      Fixes #399. See PEP530 for details.
 
 2015-11-29 -- 1.4.1
 
@@ -405,14 +530,14 @@ Change log for the astroid package (used to be astng)
       Discard will use Expr under the hood and the implemented visit_discard
       in checkers will be called with Expr nodes instead. The AST does not
       contain the old nodes, only the interoperability between them hides this
-      fact. Recommandations to move to the new nodes are emitted accordingly,
+      fact. Recommendations to move to the new nodes are emitted accordingly,
       the old names will be removed in astroid 2.0.
 
     * Add support for understanding class creation using `type.__new__(mcs, name, bases, attrs)``
 
       Until now, inferring this kind of calls resulted in Instances, not in classes,
       since astroid didn't understand that the presence of the metaclass in the call
-      leads to a class creationg, not to an instance creation.
+      leads to a class creating, not to an instance creation.
 
     * Understand the `slice` builtin. Closes issue #184.
 
@@ -525,7 +650,7 @@ Change log for the astroid package (used to be astng)
 
 2014-11-20 -- 1.3.0
 
-    * Fix a maximum recursion error occured during the inference,
+    * Fix a maximum recursion error occurred during the inference,
       where statements with the same name weren't filtered properly.
       Closes pylint issue #295.
 
@@ -626,7 +751,7 @@ Change log for the astroid package (used to be astng)
       most things there are for pylint/astroid only and we want to be
       able to fix them without requiring a new logilab.common release
 
-    * Fix names grabed using wildcard import in "absolute import mode"
+    * Fix names grabbed using wildcard import in "absolute import mode"
       (ie with absolute_import activated from the __future__ or with
       python 3). Fix pylint issue #58.
 
@@ -776,7 +901,7 @@ Change log for the astroid package (used to be astng)
     * #74746: should return empty module when __main__ is imported (patch by
       google)
 
-    * #74748: getitem protocal return constant value instead of a Const node
+    * #74748: getitem protocol return constant value instead of a Const node
       (patch by google)
 
     * #77188: support lgc.decorators.classproperty
@@ -793,7 +918,7 @@ Change log for the astroid package (used to be astng)
 
     * #70497: Crash on AttributeError: 'NoneType' object has no attribute '_infer_name'
 
-    * #70381: IndendationError in import causes crash
+    * #70381: IndentationError in import causes crash
 
     * #70565: absolute imports treated as relative (patch by Jacek Konieczny)
 
@@ -856,7 +981,7 @@ Change log for the astroid package (used to be astng)
 
 2010-09-10  --  0.20.2
     * fix astng building bug: we've to set module.package flag at the node
-      creation time otherwise we'll miss this information when infering relative
+      creation time otherwise we'll miss this information when inferring relative
       import during the build process (this should fix for instance some problems
       with numpy)
 

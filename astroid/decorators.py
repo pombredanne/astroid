@@ -1,23 +1,9 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
-#
-# The code in this file was originally part of logilab-common, licensed under
-# the same license.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2015 Florian Bruhin <me@the-compiler.org>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
 
 """ A few useful function/method decorators."""
 
@@ -108,7 +94,7 @@ def path_wrapper(func):
         except StopIteration as error:
             # Explicit StopIteration to return error information, see
             # comment in raise_if_nothing_inferred.
-            if len(error.args) > 0:
+            if error.args:
                 raise StopIteration(error.args[0])
             else:
                 raise StopIteration
@@ -153,7 +139,8 @@ def raise_if_nothing_inferred(func, instance, args, kwargs):
             inferred = True
     except StopIteration as error:
         if not inferred:
-            if len(error.args) > 0:
+            if error.args:
+                # pylint: disable=not-a-mapping
                 raise exceptions.InferenceError(**error.args[0])
             else:
                 raise exceptions.InferenceError(

@@ -1,20 +1,9 @@
-# copyright 2003-2015 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 
 """
 Inference objects are a way to represent composite AST nodes,
@@ -37,6 +26,7 @@ from astroid import util
 
 
 BUILTINS = six.moves.builtins.__name__
+objectmodel = util.lazy_import('interpreter.objectmodel')
 
 
 class FrozenSet(node_classes._BaseContainer):
@@ -66,6 +56,9 @@ class Super(node_classes.NodeNG):
     *self_class* is the class where the super call is, while
     *scope* is the function where the super call is.
     """
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.SuperModel())
+
     # pylint: disable=super-init-not-called
     def __init__(self, mro_pointer, mro_type, self_class, scope):
         self.type = mro_type
@@ -73,12 +66,6 @@ class Super(node_classes.NodeNG):
         self._class_based = False
         self._self_class = self_class
         self._scope = scope
-        self._model = {
-            '__thisclass__': self.mro_pointer,
-            '__self_class__': self._self_class,
-            '__self__': self.type,
-            '__class__': self._proxied,
-        }
 
     def _infer(self, context=None):
         yield self
@@ -134,9 +121,8 @@ class Super(node_classes.NodeNG):
     def igetattr(self, name, context=None):
         """Retrieve the inferred values of the given attribute name."""
 
-        local_name = self._model.get(name)
-        if local_name:
-            yield local_name
+        if name in self.special_attributes:
+            yield self.special_attributes.lookup(name)
             return
 
         try:
@@ -187,3 +173,48 @@ class Super(node_classes.NodeNG):
 
     def getattr(self, name, context=None):
         return list(self.igetattr(name, context=context))
+
+
+class ExceptionInstance(bases.Instance):
+    """Class for instances of exceptions
+
+    It has special treatment for some of the exceptions's attributes,
+    which are transformed at runtime into certain concrete objects, such as
+    the case of .args.
+    """
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.ExceptionInstanceModel())
+
+
+class DictInstance(bases.Instance):
+    """Special kind of instances for dictionaries
+
+    This instance knows the underlying object model of the dictionaries, which means
+    that methods such as .values or .items can be properly inferred.
+    """
+
+    # pylint: disable=unnecessary-lambda
+    special_attributes = util.lazy_descriptor(lambda: objectmodel.DictModel())
+
+
+# Custom objects tailored for dictionaries, which are used to
+# disambiguate between the types of Python 2 dict's method returns
+# and Python 3 (where they return set like objects).
+class DictItems(bases.Proxy):
+    __str__ = node_classes.NodeNG.__str__
+    __repr__ = node_classes.NodeNG.__repr__
+
+
+class DictKeys(bases.Proxy):
+    __str__ = node_classes.NodeNG.__str__
+    __repr__ = node_classes.NodeNG.__repr__
+
+
+class DictValues(bases.Proxy):
+    __str__ = node_classes.NodeNG.__str__
+    __repr__ = node_classes.NodeNG.__repr__
+
+# TODO: Hack to solve the circular import problem between node_classes and objects
+# This is not needed in 2.0, which has a cleaner design overall
+node_classes.Dict.__bases__ = (node_classes.NodeNG, DictInstance)

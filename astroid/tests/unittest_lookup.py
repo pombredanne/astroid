@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2007-2013 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """tests for the astroid variable lookup capabilities
 """
 import functools
@@ -25,7 +16,6 @@ from astroid import builder
 from astroid import exceptions
 from astroid import nodes
 from astroid import scoped_nodes
-from astroid import test_utils
 from astroid import util
 from astroid.tests import resources
 
@@ -284,7 +274,7 @@ class LookupTest(resources.SysPathSetup, unittest.TestCase):
                 def test(self):
                     pass
         '''
-        member = test_utils.extract_node(code, __name__).targets[0]
+        member = builder.extract_node(code, __name__).targets[0]
         it = member.infer()
         obj = next(it)
         self.assertIsInstance(obj, nodes.Const)
@@ -301,7 +291,7 @@ class LookupTest(resources.SysPathSetup, unittest.TestCase):
                 def funcA():
                     return 4
         '''
-        decname = test_utils.extract_node(code, __name__)
+        decname = builder.extract_node(code, __name__)
         it = decname.infer()
         obj = next(it)
         self.assertIsInstance(obj, nodes.FunctionDef)

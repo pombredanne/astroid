@@ -1,26 +1,16 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """astroid manager: avoid multiple astroid build of a same module when
 possible by providing a class responsible to get astroid representation
 from various source and using a cache of built modules)
 """
 
-import imp
 import os
 import sys
 import zipimport
@@ -28,6 +18,7 @@ import zipimport
 import six
 
 from astroid import exceptions
+from astroid.interpreter._import import spec
 from astroid import modutils
 from astroid import transforms
 from astroid import util
@@ -96,6 +87,10 @@ class AstroidManager(object):
         from astroid.builder import AstroidBuilder
         return AstroidBuilder(self).string_build('', modname)
 
+    def _build_namespace_module(self, modname, path):
+        from astroid.builder import build_namespace_package_module
+        return build_namespace_package_module(modname, path)
+
     def _can_load_extension(self, modname):
         if self.always_load_extensions:
             return True
@@ -116,30 +111,47 @@ class AstroidManager(object):
         if context_file:
             os.chdir(os.path.dirname(context_file))
         try:
-            filepath, mp_type = self.file_from_module_name(modname, context_file)
-            if mp_type == modutils.PY_ZIPMODULE:
-                module = self.zip_import_data(filepath)
+            found_spec = self.file_from_module_name(modname, context_file)
+            # pylint: disable=no-member
+            if found_spec.type == spec.ModuleType.PY_ZIPMODULE:
+                # pylint: disable=no-member
+                module = self.zip_import_data(found_spec.location)
                 if module is not None:
                     return module
-            elif mp_type in (imp.C_BUILTIN, imp.C_EXTENSION):
-                if mp_type == imp.C_EXTENSION and not self._can_load_extension(modname):
+
+            elif found_spec.type in (spec.ModuleType.C_BUILTIN,
+                                     spec.ModuleType.C_EXTENSION):
+                # pylint: disable=no-member
+                if (found_spec.type == spec.ModuleType.C_EXTENSION
+                        and not self._can_load_extension(modname)):
                     return self._build_stub_module(modname)
                 try:
                     module = modutils.load_module_from_name(modname)
                 except Exception as ex: # pylint: disable=broad-except
                     util.reraise(exceptions.AstroidImportError(
                         'Loading {modname} failed with:\n{error}',
-                        modname=modname, path=filepath, error=ex))
+                        modname=modname, path=found_spec.location, error=ex))
                 return self.ast_from_module(module, modname)
-            elif mp_type == imp.PY_COMPILED:
+
+            elif found_spec.type == spec.ModuleType.PY_COMPILED:
                 raise exceptions.AstroidImportError(
                     "Unable to load compiled module {modname}.",
-                    modname=modname, path=filepath)
-            if filepath is None:
+                    # pylint: disable=no-member
+                    modname=modname, path=found_spec.location)
+
+            elif found_spec.type == spec.ModuleType.PY_NAMESPACE:
+                return self._build_namespace_module(modname,
+                                                    # pylint: disable=no-member
+                                                    found_spec.submodule_search_locations)
+
+            # pylint: disable=no-member
+            if found_spec.location is None:
                 raise exceptions.AstroidImportError(
                     "Can't find a file for module {modname}.",
                     modname=modname)
-            return self.ast_from_file(filepath, modname, fallback=False)
+
+            # pylint: disable=no-member
+            return self.ast_from_file(found_spec.location, modname, fallback=False)
         except exceptions.AstroidBuildingError as e:
             for hook in self._failed_import_hooks:
                 try:

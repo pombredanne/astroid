@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2009-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """this module contains a set of functions to handle python protocols for nodes
 where it makes sense.
 """
@@ -35,6 +26,8 @@ from astroid import helpers
 from astroid import nodes
 from astroid import util
 
+raw_building = util.lazy_import('raw_building')
+objects = util.lazy_import('objects')
 
 def _reflected_name(name):
     return "__r" + name[2:]
@@ -154,10 +147,13 @@ def _multiply_seq_by_int(self, opnode, other, context):
 def _filter_uninferable_nodes(elts, context):
     for elt in elts:
         if elt is util.Uninferable:
-            yield elt
+            yield nodes.Unknown()
         else:
             for inferred in elt.infer(context):
-                yield inferred
+                if inferred is not util.Uninferable:
+                    yield inferred
+                else:
+                    yield nodes.Unknown()
 
 
 @decorators.yes_if_nothing_inferred
@@ -189,10 +185,11 @@ nodes.List.infer_binary_op = tl_infer_binary_op
 
 
 @decorators.yes_if_nothing_inferred
-def instance_infer_binary_op(self, opnode, operator, other, context, method):
+def instance_class_infer_binary_op(self, opnode, operator, other, context, method):
     return method.infer_call_result(self, context)
 
-bases.Instance.infer_binary_op = instance_infer_binary_op
+bases.Instance.infer_binary_op = instance_class_infer_binary_op
+nodes.ClassDef.infer_binary_op = instance_class_infer_binary_op
 
 
 # assignment ##################################################################
@@ -223,11 +220,12 @@ def _resolve_looppart(parts, asspath, context):
         except TypeError:
             continue # XXX log error
         for stmt in itered:
+            index_node = nodes.Const(index)
             try:
-                assigned = stmt.getitem(index, context)
-            except (AttributeError, IndexError):
-                continue
-            except TypeError: # stmt is unsubscriptable Const
+                assigned = stmt.getitem(index_node, context)
+            except (AttributeError,
+                    exceptions.AstroidTypeError,
+                    exceptions.AstroidIndexError):
                 continue
             if not asspath:
                 # we achieved to resolved the assignment path,
@@ -247,6 +245,10 @@ def _resolve_looppart(parts, asspath, context):
 
 @decorators.raise_if_nothing_inferred
 def for_assigned_stmts(self, node=None, context=None, asspath=None):
+    if isinstance(self, nodes.AsyncFor) or getattr(self, 'is_async', False):
+        # Skip inferring of async code for now
+        raise StopIteration(dict(node=self, unknown=node,
+                                 assign_path=asspath, context=context))
     if asspath is None:
         for lst in self.iter.infer(context):
             if isinstance(lst, (nodes.Tuple, nodes.List)):
@@ -361,7 +363,16 @@ def assign_assigned_stmts(self, node=None, context=None, asspath=None):
     raise StopIteration(dict(node=self, unknown=node,
                              assign_path=asspath, context=context))
 
+
+def assign_annassigned_stmts(self, node=None, context=None, asspath=None):
+    for inferred in assign_assigned_stmts(self, node, context, asspath):
+        if inferred is None:
+            yield util.Uninferable
+        else:
+            yield inferred
+
 nodes.Assign.assigned_stmts = assign_assigned_stmts
+nodes.AnnAssign.assigned_stmts = assign_annassigned_stmts
 nodes.AugAssign.assigned_stmts = assign_assigned_stmts
 
 
@@ -371,11 +382,12 @@ def _resolve_asspart(parts, asspath, context):
     index = asspath.pop(0)
     for part in parts:
         if hasattr(part, 'getitem'):
+            index_node = nodes.Const(index)
             try:
-                assigned = part.getitem(index, context)
+                assigned = part.getitem(index_node, context)
             # XXX raise a specific exception to avoid potential hiding of
             # unexpected exception ?
-            except (TypeError, IndexError):
+            except (exceptions.AstroidTypeError, exceptions.AstroidIndexError):
                 return
             if not asspath:
                 # we achieved to resolved the assignment path, don't infer the
@@ -398,7 +410,8 @@ def _resolve_asspart(parts, asspath, context):
 def excepthandler_assigned_stmts(self, node=None, context=None, asspath=None):
     for assigned in node_classes.unpack_infer(self.type):
         if isinstance(assigned, nodes.ClassDef):
-            assigned = bases.Instance(assigned)
+            assigned = objects.ExceptionInstance(assigned)
+
         yield assigned
     # Explicit StopIteration to return error information, see comment
     # in raise_if_nothing_inferred.
@@ -501,6 +514,11 @@ def with_assigned_stmts(self, node=None, context=None, asspath=None):
                         'Tried to infer a nonexistent target with index {index} '
                         'in {node!r}.', node=self, targets=node,
                         assign_path=asspath, context=context))
+                except TypeError:
+                    util.reraise(exceptions.InferenceError(
+                        'Tried to unpack an non-iterable value '
+                        'in {node!r}.', node=self, targets=node,
+                        assign_path=asspath, context=context))
             yield obj
     # Explicit StopIteration to return error information, see comment
     # in raise_if_nothing_inferred.
@@ -563,13 +581,13 @@ def starred_assigned_stmts(self, node=None, context=None, asspath=None):
         # anything before the starred node and from right to left
         # to remove anything after the starred node.
 
-        for index, node in enumerate(lhs.elts):
-            if not isinstance(node, nodes.Starred):
+        for index, left_node in enumerate(lhs.elts):
+            if not isinstance(left_node, nodes.Starred):
                 elts.popleft()
                 continue
             lhs_elts = collections.deque(reversed(lhs.elts[index:]))
-            for node in lhs_elts:
-                if not isinstance(node, nodes.Starred):
+            for right_node in lhs_elts:
+                if not isinstance(right_node, nodes.Starred):
                     elts.pop()
                     continue
                 # We're done

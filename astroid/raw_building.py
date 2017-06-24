@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """this module contains a set of functions to create astroid trees from scratch
 (build_* functions) or from living object (object_build_* functions)
 """
@@ -218,12 +209,12 @@ def _base_class_object_build(node, member, basenames, name=None, localname=None)
     except: # pylint: disable=bare-except
         pass
     else:
-        for name, obj in instdict.items():
+        for item_name, obj in instdict.items():
             valnode = nodes.EmptyNode()
             valnode.object = obj
             valnode.parent = klass
             valnode.lineno = 1
-            klass.instance_attrs[name] = [valnode]
+            klass.instance_attrs[item_name] = [valnode]
     return klass
 
 
@@ -271,7 +262,7 @@ class InspectBuilder(object):
         except AttributeError:
             # in jython, java modules have no __doc__ (see #109562)
             node = build_module(modname)
-        node.file = node.path = path and os.path.abspath(path) or path
+        node.file = node.path = os.path.abspath(path) if path else path
         node.name = modname
         MANAGER.cache_module(node)
         node.package = hasattr(module, '__path__')
@@ -325,7 +316,7 @@ class InspectBuilder(object):
                 attach_const_node(node, name, member)
             elif inspect.isroutine(member):
                 # This should be called for Jython, where some builtin
-                # methods aren't catched by isbuiltin branch.
+                # methods aren't caught by isbuiltin branch.
                 _build_from_function(node, name, member, self._module)
             else:
                 # create an empty node so that the name is actually defined
@@ -383,6 +374,7 @@ def _astroid_bootstrapping(astroid_builtin=None):
         from six.moves import builtins
         astroid_builtin = Astroid_BUILDER.inspect_build(builtins)
 
+    # pylint: disable=redefined-outer-name
     for cls, node_cls in node_classes.CONST_CLS.items():
         if cls is type(None):
             proxy = build_class('NoneType')
@@ -410,3 +402,15 @@ _GeneratorType = nodes.ClassDef(types.GeneratorType.__name__, types.GeneratorTyp
 _GeneratorType.parent = MANAGER.astroid_cache[six.moves.builtins.__name__]
 bases.Generator._proxied = _GeneratorType
 Astroid_BUILDER.object_build(bases.Generator._proxied, types.GeneratorType)
+
+_builtins = MANAGER.astroid_cache[six.moves.builtins.__name__]
+BUILTIN_TYPES = (types.GetSetDescriptorType, types.GeneratorType,
+                 types.MemberDescriptorType, type(None), type(NotImplemented),
+                 types.FunctionType, types.MethodType,
+                 types.BuiltinFunctionType, types.ModuleType, types.TracebackType)
+for _type in BUILTIN_TYPES:
+    if _type.__name__ not in _builtins:
+        cls = nodes.ClassDef(_type.__name__, _type.__doc__)
+        cls.parent = MANAGER.astroid_cache[six.moves.builtins.__name__]
+        Astroid_BUILDER.object_build(cls, _type)
+        _builtins[_type.__name__] = cls

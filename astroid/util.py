@@ -1,29 +1,27 @@
-# copyright 2003-2015 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
-#
-# The code in this file was originally part of logilab-common, licensed under
-# the same license.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
 
 import sys
 import warnings
 
+import importlib
 import lazy_object_proxy
 import six
+
+
+def lazy_descriptor(obj):
+    class DescriptorProxy(lazy_object_proxy.Proxy):
+        def __get__(self, instance, owner=None):
+            return self.__class__.__get__(self, instance)
+    return DescriptorProxy(obj)
+
+
+def lazy_import(module_name):
+    return lazy_object_proxy.Proxy(
+        lambda: importlib.import_module('.' + module_name, 'astroid'))
 
 
 def reraise(exception):
@@ -50,6 +48,11 @@ class Uninferable(object):
 
     def __call__(self, *args, **kwargs):
         return self
+
+    def __bool__(self):
+        return False
+
+    __nonzero__ = __bool__
 
     def accept(self, visitor):
         func = getattr(visitor, "visit_uninferable")

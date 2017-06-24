@@ -1,26 +1,17 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2009-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2013-2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """this module contains utilities for rebuilding a _ast tree in
 order to get a single Astroid representation
 """
 
-import _ast
 import sys
+import _ast
 
 import astroid
 from astroid import astpeephole
@@ -105,8 +96,8 @@ def _visit_or_none(node, attr, visitor, parent, visit='visit',
     value = getattr(node, attr, None)
     if value:
         return getattr(visitor, visit)(value, parent, **kws)
-    else:
-        return None
+
+    return None
 
 
 def _get_context(node):
@@ -192,12 +183,26 @@ class TreeRebuilder(object):
                            None for child in node.kw_defaults]
             annotations = [self.visit(arg.annotation, newnode) if
                            arg.annotation else None for arg in node.args]
+            kwonlyargs_annotations = [
+                self.visit(arg.annotation, newnode) if arg.annotation else None
+                for arg in node.kwonlyargs
+            ]
         else:
             kwonlyargs = []
             kw_defaults = []
             annotations = []
-        newnode.postinit(args, defaults, kwonlyargs, kw_defaults,
-                         annotations, varargannotation, kwargannotation)
+            kwonlyargs_annotations = []
+
+        newnode.postinit(
+            args=args,
+            defaults=defaults,
+            kwonlyargs=kwonlyargs,
+            kw_defaults=kw_defaults,
+            annotations=annotations,
+            kwonlyargs_annotations=kwonlyargs_annotations,
+            varargannotation=varargannotation,
+            kwargannotation=kwargannotation
+        )
         # save argument names in locals:
         if vararg:
             newnode.parent.set_local(vararg, newnode)
@@ -326,7 +331,7 @@ class TreeRebuilder(object):
             for keyword in node.keywords:
                 if keyword.arg == 'metaclass':
                     metaclass = self.visit(keyword, newnode).value
-                break
+                    break
         if node.decorator_list:
             decorators = self.visit_decorators(node, newnode)
         else:
@@ -335,12 +340,15 @@ class TreeRebuilder(object):
                           for child in node.bases],
                          [self.visit(child, newnode)
                           for child in node.body],
-                         decorators, newstyle, metaclass)
+                         decorators, newstyle, metaclass,
+                         [self.visit(kwd, newnode) for kwd in node.keywords
+                          if kwd.arg != 'metaclass'] if PY3 else [])
         return newnode
 
     def visit_const(self, node, parent):
         """visit a Const node by returning a fresh instance of it"""
-        return nodes.Const(node.value, getattr(node, 'lineno', None),
+        return nodes.Const(node.value,
+                           getattr(node, 'lineno', None),
                            getattr(node, 'col_offset', None), parent)
 
     def visit_continue(self, node, parent):
@@ -364,7 +372,8 @@ class TreeRebuilder(object):
         newnode.postinit(self.visit(node.target, newnode),
                          self.visit(node.iter, newnode),
                          [self.visit(child, newnode)
-                          for child in node.ifs])
+                          for child in node.ifs],
+                         getattr(node, 'is_async', None))
         return newnode
 
     def visit_decorators(self, node, parent):
@@ -521,7 +530,9 @@ class TreeRebuilder(object):
         elif context == astroid.Store:
             newnode = nodes.AssignAttr(node.attr, node.lineno, node.col_offset,
                                        parent)
-            self._delayed_assattr.append(newnode)
+            # Prohibit a local save if we are in an ExceptHandler.
+            if not isinstance(parent, astroid.ExceptHandler):
+                self._delayed_assattr.append(newnode)
         else:
             newnode = nodes.Attribute(node.attr, node.lineno, node.col_offset,
                                       parent)
@@ -833,6 +844,16 @@ class TreeRebuilder3(TreeRebuilder):
         elif node.handlers:
             return self.visit_tryexcept(node, parent)
 
+    def visit_annassign(self, node, parent):
+        """visit an AnnAssign node by returning a fresh instance of it"""
+        newnode = nodes.AnnAssign(node.lineno, node.col_offset, parent)
+        annotation = _visit_or_none(node, 'annotation', self, newnode)
+        newnode.postinit(target=self.visit(node.target, newnode),
+                         annotation=annotation,
+                         simple=node.simple,
+                         value=_visit_or_none(node, 'value', self, newnode))
+        return newnode
+
     def _visit_with(self, cls, node, parent):
         if 'items' not in node._fields:
             # python < 3.3
@@ -876,6 +897,18 @@ class TreeRebuilder3(TreeRebuilder):
     def visit_asyncwith(self, node, parent):
         return self._visit_with(nodes.AsyncWith, node, parent)
 
+    def visit_joinedstr(self, node, parent):
+        newnode = nodes.JoinedStr(node.lineno, node.col_offset, parent)
+        newnode.postinit([self.visit(child, newnode)
+                          for child in node.values])
+        return newnode
+
+    def visit_formattedvalue(self, node, parent):
+        newnode = nodes.FormattedValue(node.lineno, node.col_offset, parent)
+        newnode.postinit(self.visit(node.value, newnode),
+                         node.conversion,
+                         _visit_or_none(node, 'format_spec', self, newnode))
+        return newnode
 
 if sys.version_info >= (3, 0):
     TreeRebuilder = TreeRebuilder3

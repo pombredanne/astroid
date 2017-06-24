@@ -1,24 +1,14 @@
-# copyright 2003-2015 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 
 import unittest
 
 from astroid import bases
+from astroid import builder
 from astroid import exceptions
 from astroid import nodes
 from astroid import objects
@@ -27,7 +17,7 @@ from astroid import test_utils
 class ObjectsTest(unittest.TestCase):
 
     def test_frozenset(self):
-        node = test_utils.extract_node("""
+        node = builder.extract_node("""
         frozenset({1: 2, 2: 3}) #@
         """)
         inferred = next(node.infer())
@@ -48,7 +38,7 @@ class ObjectsTest(unittest.TestCase):
 class SuperTests(unittest.TestCase):
 
     def test_inferring_super_outside_methods(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class Module(object):
             pass
         class StaticMethod(object):
@@ -74,7 +64,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(no_arguments.qname(), "%s.super" % bases.BUILTINS)
 
     def test_inferring_unbound_super_doesnt_work(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class Test(object):
             def __init__(self):
                 super(Test) #@
@@ -84,7 +74,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(unbounded.qname(), "%s.super" % bases.BUILTINS)
 
     def test_use_default_inference_on_not_inferring_args(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class Test(object):
             def __init__(self):
                 super(Lala, self) #@
@@ -103,7 +93,7 @@ class SuperTests(unittest.TestCase):
         # super doesn't work on old style class, but leave
         # that as an error for pylint. We'll infer Super objects,
         # but every call will result in a failure at some point.
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class OldStyle:
             def __init__(self):
                 super(OldStyle, self) #@
@@ -119,7 +109,7 @@ class SuperTests(unittest.TestCase):
 
     @test_utils.require_version(minver='3.0')
     def test_no_arguments_super(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class First(object): pass
         class Second(First):
             def test(self):
@@ -143,7 +133,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(second.mro_pointer.name, 'Second')
 
     def test_super_simple_cases(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class First(object): pass
         class Second(First): pass
         class Third(First):
@@ -205,7 +195,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(fifth.mro_pointer.name, 'Fourth')
 
     def test_super_infer(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class Super(object):
             def __init__(self):
                 super(Super, self) #@
@@ -217,7 +207,7 @@ class SuperTests(unittest.TestCase):
         self.assertIs(inferred, reinferred)
 
     def test_inferring_invalid_supers(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class Super(object):
             def __init__(self):
                 # MRO pointer is not a type
@@ -244,7 +234,7 @@ class SuperTests(unittest.TestCase):
             self.assertIsInstance(cm.exception.super_.type, invalid_type)
 
     def test_proxied(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class Super(object):
             def __init__(self):
                 super(Super, self) #@
@@ -255,7 +245,7 @@ class SuperTests(unittest.TestCase):
         self.assertIsInstance(proxied, nodes.ClassDef)
 
     def test_super_bound_model(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class First(object):
             def method(self):
                 pass
@@ -308,7 +298,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(sixth.type, 'classmethod')
 
     def test_super_getattr_single_inheritance(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class First(object):
             def test(self): pass
         class Second(First):
@@ -354,7 +344,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(second_unbound.parent.name, 'First')
 
     def test_super_invalid_mro(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class A(object):
            test = 42
         class Super(A, A):
@@ -366,7 +356,7 @@ class SuperTests(unittest.TestCase):
             next(inferred.getattr('test'))
 
     def test_super_complex_mro(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class A(object):
             def spam(self): return "A"
             def foo(self): return "A"
@@ -401,7 +391,7 @@ class SuperTests(unittest.TestCase):
         self.assertEqual(static.parent.scope().name, 'A')
 
     def test_super_data_model(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class X(object): pass
         class A(X):
             def __init__(self):
@@ -441,7 +431,7 @@ class SuperTests(unittest.TestCase):
             expected_mro)
 
     def test_super_mro(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         class A(object): pass
         class B(A): pass
         class C(A): pass
@@ -469,7 +459,7 @@ class SuperTests(unittest.TestCase):
             fifth.super_mro()
 
     def test_super_yes_objects(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         from collections import Missing
         class A(object):
             def __init__(self):
@@ -482,7 +472,7 @@ class SuperTests(unittest.TestCase):
         self.assertIsInstance(second, bases.Instance)
 
     def test_super_invalid_types(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         import collections
         class A(object):
             def __init__(self):
@@ -495,7 +485,7 @@ class SuperTests(unittest.TestCase):
             inferred.super_mro()
 
     def test_super_properties(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         class Foo(object):
             @property
             def dict(self):

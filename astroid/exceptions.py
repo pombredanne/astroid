@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2007, 2009-2010, 2013 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """this module contains exceptions used in the astroid library
 """
 from astroid import util
@@ -51,6 +42,7 @@ class AstroidBuildingError(AstroidError):
         error: Exception raised during construction.
     """
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='Failed to import module {modname}.', **kws):
         super(AstroidBuildingError, self).__init__(message, **kws)
 
@@ -69,6 +61,7 @@ class TooManyLevelsError(AstroidImportError):
     level = None
     name = None
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='Relative import with too many levels '
                                '({level}) for module {name!r}', **kws):
         super(TooManyLevelsError, self).__init__(message, **kws)
@@ -89,6 +82,7 @@ class NoDefault(AstroidError):
     func = None
     name = None
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='{func!r} has no default for {name!r}.', **kws):
         super(NoDefault, self).__init__(message, **kws)
 
@@ -153,6 +147,7 @@ class InferenceError(ResolveError):
     node = None
     context = None
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='Inference failed for {node!r}.', **kws):
         super(InferenceError, self).__init__(message, **kws)
 
@@ -170,6 +165,7 @@ class NameInferenceError(InferenceError):
     name = None
     scope = None
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='{name!r} not found in {scope!r}.', **kws):
         super(NameInferenceError, self).__init__(message, **kws)
 
@@ -185,6 +181,7 @@ class AttributeInferenceError(ResolveError):
     target = None
     attribute = None
 
+    # pylint: disable=useless-super-delegation; https://github.com/PyCQA/pylint/issues/1085
     def __init__(self, message='{attribute!r} not found on {target!r}.', **kws):
         super(AttributeInferenceError, self).__init__(message, **kws)
 
@@ -193,6 +190,18 @@ class UseInferenceDefault(Exception):
     """exception to be raised in custom inference function to indicate that it
     should go back to the default behaviour
     """
+
+
+class _NonDeducibleTypeHierarchy(Exception):
+    """Raised when is_subtype / is_supertype can't deduce the relation between two types."""
+
+
+class AstroidIndexError(AstroidError):
+    """Raised when an Indexable / Mapping does not have an index / key."""
+
+
+class AstroidTypeError(AstroidError):
+    """Raised when a TypeError would be expected in Python code."""
 
 
 # Backwards-compatibility aliases

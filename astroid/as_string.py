@@ -1,23 +1,14 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2009-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2013-2014 Google, Inc.
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """This module renders Astroid nodes as string:
 
-* :func:`to_code` function return equivalent (hopefuly valid) python string
+* :func:`to_code` function return equivalent (hopefully valid) python string
 
 * :func:`dump` function return an internal representation of nodes found
   in the tree, useful for debugging or understanding the tree structure
@@ -26,7 +17,7 @@ import sys
 
 import six
 
-# pylint: disable=no-self-use; some visit methods don't need the self argument.
+
 # pylint: disable=unused-argument
 
 
@@ -76,6 +67,15 @@ class AsStringVisitor(object):
         """return an astroid.AugAssign node as string"""
         return '%s %s %s' % (node.target.accept(self), node.op, node.value.accept(self))
 
+    def visit_annassign(self, node):
+        """Return an astroid.AugAssign node as string"""
+
+        target = node.target.accept(self)
+        annotation = node.annotation.accept(self)
+        if node.value is None:
+            return '%s: %s' % (target, annotation)
+        return '%s: %s = %s' % (target, annotation, node.value.accept(self))
+
     def visit_repr(self, node):
         """return an astroid.Repr node as string"""
         return '`%s`' % node.value.accept(self)
@@ -107,10 +107,10 @@ class AsStringVisitor(object):
 
     def visit_classdef(self, node):
         """return an astroid.ClassDef node as string"""
-        decorate = node.decorators and node.decorators.accept(self)  or ''
+        decorate = node.decorators.accept(self) if node.decorators else ''
         bases = ', '.join([n.accept(self) for n in node.bases])
         if sys.version_info[0] == 2:
-            bases = bases and '(%s)' % bases or ''
+            bases = '(%s)' % bases if bases else ''
         else:
             metaclass = node.metaclass()
             if metaclass and not node.has_metaclass_hack():
@@ -119,8 +119,8 @@ class AsStringVisitor(object):
                 else:
                     bases = '(metaclass=%s)' % metaclass.name
             else:
-                bases = bases and '(%s)' % bases or ''
-        docs = node.doc and '\n%s"""%s"""' % (self.indent, node.doc) or ''
+                bases = '(%s)' % bases if bases else ''
+        docs = '\n%s"""%s"""' % (self.indent, node.doc) if node.doc else ''
         return '\n\n%sclass %s%s:%s\n%s\n' % (decorate, node.name, bases, docs,
                                               self._stmt_list(node.body))
 
@@ -241,8 +241,8 @@ class AsStringVisitor(object):
 
     def visit_functiondef(self, node):
         """return an astroid.Function node as string"""
-        decorate = node.decorators and node.decorators.accept(self)  or ''
-        docs = node.doc and '\n%s"""%s"""' % (self.indent, node.doc) or ''
+        decorate = node.decorators.accept(self) if node.decorators else ''
+        docs = '\n%s"""%s"""' % (self.indent, node.doc) if node.doc else ''
         return_annotation = ''
         if six.PY3 and node.returns:
             return_annotation = '->' + node.returns.as_string()
@@ -307,7 +307,7 @@ class AsStringVisitor(object):
 
     def visit_module(self, node):
         """return an astroid.Module node as string"""
-        docs = node.doc and '"""%s"""\n\n' % node.doc or ''
+        docs = '"""%s"""\n\n' % node.doc if node.doc else ''
         return docs + '\n'.join([n.accept(self) for n in node.body]) + '\n\n'
 
     def visit_name(self, node):
@@ -344,8 +344,8 @@ class AsStringVisitor(object):
         """return an astroid.Return node as string"""
         if node.value:
             return 'return %s' % node.value.accept(self)
-        else:
-            return 'return'
+
+        return 'return'
 
     def visit_index(self, node):
         """return a astroid.Index node as string"""
@@ -362,9 +362,9 @@ class AsStringVisitor(object):
 
     def visit_slice(self, node):
         """return a astroid.Slice node as string"""
-        lower = node.lower and node.lower.accept(self) or ''
-        upper = node.upper and node.upper.accept(self) or ''
-        step = node.step and node.step.accept(self) or ''
+        lower = node.lower.accept(self) if node.lower else ''
+        upper = node.upper.accept(self) if node.upper else''
+        step = node.step.accept(self) if node.step else ''
         if step:
             return '%s:%s:%s' % (lower, upper, step)
         return  '%s:%s' % (lower, upper)
@@ -418,12 +418,12 @@ class AsStringVisitor(object):
 
     def visit_yield(self, node):
         """yield an ast.Yield node as string"""
-        yi_val = node.value and (" " + node.value.accept(self)) or ""
+        yi_val = (" " + node.value.accept(self)) if node.value else ""
         expr = 'yield' + yi_val
         if node.parent.is_statement:
             return expr
-        else:
-            return "(%s)" % (expr,)
+
+        return "(%s)" % (expr,)
 
     def visit_starred(self, node):
         """return Starred node as string"""
@@ -470,12 +470,12 @@ class AsStringVisitor3(AsStringVisitor):
 
     def visit_yieldfrom(self, node):
         """ Return an astroid.YieldFrom node as string. """
-        yi_val = node.value and (" " + node.value.accept(self)) or ""
+        yi_val = (" " + node.value.accept(self)) if node.value else ""
         expr = 'yield from' + yi_val
         if node.parent.is_statement:
             return expr
-        else:
-            return "(%s)" % (expr,)
+
+        return "(%s)" % (expr,)
 
     def visit_asyncfunctiondef(self, node):
         function = super(AsStringVisitor3, self).visit_functiondef(node)
@@ -490,6 +490,24 @@ class AsStringVisitor3(AsStringVisitor):
     def visit_asyncfor(self, node):
         return 'async %s' % self.visit_for(node)
 
+    def visit_joinedstr(self, node):
+        # Special treatment for constants,
+        # as we want to join literals not reprs
+        string = ''.join(
+            value.value if type(value).__name__ == 'Const'
+            else value.accept(self)
+            for value in node.values
+        )
+        return "f'%s'" % string
+
+    def visit_formattedvalue(self, node):
+        return '{%s}' % node.value.accept(self)
+
+    def visit_comprehension(self, node):
+        """return an astroid.Comprehension node as string"""
+        return '%s%s' % ('async ' if node.is_async else '',
+                         super(AsStringVisitor3, self).visit_comprehension(node))
+
 
 def _import_string(names):
     """return a list of (name, asname) formatted as a string"""
@@ -499,7 +517,7 @@ def _import_string(names):
             _names.append('%s as %s' % (name, asname))
         else:
             _names.append(name)
-    return  ', '.join(_names)
+    return ', '.join(_names)
 
 
 if sys.version_info >= (3, 0):

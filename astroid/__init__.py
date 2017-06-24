@@ -1,20 +1,10 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2013, 2015 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """Python Abstract Syntax Tree New Generation
 
 The aim of this module is to provide a common base representation of
@@ -39,6 +29,7 @@ Main modules are:
 
 * builder contains the class responsible to build astroid trees
 """
+
 import os
 import sys
 import re
@@ -48,18 +39,16 @@ import enum
 
 
 _Context = enum.Enum('Context', 'Load Store Del')
-# pylint: disable=no-member; github.com/pycqa/pylint/issues/690
 Load = _Context.Load
 Store = _Context.Store
 Del = _Context.Del
 del _Context
 
 
+from .__pkginfo__ import version as __version__
 # WARNING: internal imports order matters !
 
 # pylint: disable=redefined-builtin, wildcard-import
-# pylint: disable=wrong-import-position; the current order of imports is critical
-# here, that's why we don't respect it.
 
 # make all exception classes accessible from astroid package
 from astroid.exceptions import *
@@ -72,10 +61,10 @@ from astroid import inference
 
 # more stuff available
 from astroid import raw_building
-from astroid.bases import Instance, BoundMethod, UnboundMethod
+from astroid.bases import BaseInstance, Instance, BoundMethod, UnboundMethod
 from astroid.node_classes import are_exclusive, unpack_infer
 from astroid.scoped_nodes import builtin_lookup
-from astroid.builder import parse
+from astroid.builder import parse, extract_node
 from astroid.util import Uninferable, YES
 
 # make a manager instance (borg) accessible from astroid package
@@ -104,8 +93,8 @@ class AsStringRegexpPredicate(object):
 
     def __call__(self, node):
         if self.expression is not None:
-            # pylint: disable=no-member; github.com/pycqa/astroid/126
             node = attrgetter(self.expression)(node)
+        # pylint: disable=no-member; github.com/pycqa/astroid/126
         return self.regexp.search(node.as_string())
 
 def inference_tip(infer_function):

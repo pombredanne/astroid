@@ -1,20 +1,11 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2014 Google, Inc.
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """this module contains a set of functions to handle inference on astroid trees
 """
 
@@ -29,6 +20,7 @@ from astroid import decorators
 from astroid import helpers
 from astroid import manager
 from astroid import nodes
+from astroid.interpreter import dunder_lookup
 from astroid import protocols
 from astroid import util
 
@@ -50,11 +42,76 @@ nodes.ClassDef._infer = infer_end
 nodes.FunctionDef._infer = infer_end
 nodes.Lambda._infer = infer_end
 nodes.Const._infer = infer_end
-nodes.List._infer = infer_end
-nodes.Tuple._infer = infer_end
-nodes.Dict._infer = infer_end
-nodes.Set._infer = infer_end
 nodes.Slice._infer = infer_end
+
+
+def infer_seq(self, context=None):
+    if not any(isinstance(e, nodes.Starred) for e in self.elts):
+        yield self
+    else:
+        values = _infer_seq(self, context)
+        new_seq = type(self)(self.lineno, self.col_offset, self.parent)
+        new_seq.postinit(values)
+        yield new_seq
+
+
+def _infer_seq(node, context=None):
+    """Infer all values based on _BaseContainer.elts"""
+    values = []
+
+    for elt in node.elts:
+        if isinstance(elt, nodes.Starred):
+            starred = helpers.safe_infer(elt.value, context)
+            if starred in (None, util.Uninferable):
+                raise exceptions.InferenceError(node=node,
+                                                context=context)
+            if not hasattr(starred, 'elts'):
+                raise exceptions.InferenceError(node=node,
+                                                context=context)
+            values.extend(_infer_seq(starred))
+        else:
+            values.append(elt)
+    return values
+
+
+nodes.List._infer = infer_seq
+nodes.Tuple._infer = infer_seq
+nodes.Set._infer = infer_seq
+
+
+def infer_map(self, context=None):
+    if not any(isinstance(k, nodes.DictUnpack) for k, _ in self.items):
+        yield self
+    else:
+        items = _infer_map(self, context)
+        new_seq = type(self)(self.lineno, self.col_offset, self.parent)
+        new_seq.postinit(list(items.items()))
+        yield new_seq
+
+
+def _infer_map(node, context):
+    """Infer all values based on Dict.items"""
+    values = {}
+    for name, value in node.items:
+        if isinstance(name, nodes.DictUnpack):
+            double_starred = helpers.safe_infer(value, context)
+            if double_starred in (None, util.Uninferable):
+                raise exceptions.InferenceError
+            if not isinstance(double_starred, nodes.Dict):
+                raise exceptions.InferenceError(node=node,
+                                                context=context)
+            values.update(_infer_map(double_starred, context))
+        else:
+            key = helpers.safe_infer(name, context=context)
+            value = helpers.safe_infer(value, context=context)
+            if key is None or value is None:
+                raise exceptions.InferenceError(node=node,
+                                                context=context)
+            values[key] = value
+    return values
+
+
+nodes.Dict._infer = infer_map
 
 
 def _higher_function_scope(node):
@@ -181,6 +238,21 @@ def infer_attribute(self, context=None):
         if owner is util.Uninferable:
             yield owner
             continue
+
+        if context and context.boundnode:
+            # This handles the situation where the attribute is accessed through a subclass
+            # of a base class and the attribute is defined at the base class's level,
+            # by taking in consideration a redefinition in the subclass.
+            if (isinstance(owner, bases.Instance)
+                    and isinstance(context.boundnode, bases.Instance)):
+                try:
+                    if helpers.is_subtype(helpers.object_type(context.boundnode),
+                                          helpers.object_type(owner)):
+                        owner = context.boundnode
+                except exceptions._NonDeducibleTypeHierarchy:
+                    # Can't determine anything useful.
+                    pass
+
         try:
             context.boundnode = owner
             for obj in owner.igetattr(self.attrname, context):
@@ -212,32 +284,7 @@ def infer_global(self, context=None):
 nodes.Global._infer = infer_global
 
 
-_SLICE_SENTINEL = object()
-
-def _slice_value(index, context=None):
-    """Get the value of the given slice index."""
-    if isinstance(index, nodes.Const):
-        if isinstance(index.value, (int, type(None))):
-            return index.value
-    elif index is None:
-        return None
-    else:
-        # Try to infer what the index actually is.
-        # Since we can't return all the possible values,
-        # we'll stop at the first possible value.
-        try:
-            inferred = next(index.infer(context=context))
-        except exceptions.InferenceError:
-            pass
-        else:
-            if isinstance(inferred, nodes.Const):
-                if isinstance(inferred.value, (int, type(None))):
-                    return inferred.value
-
-    # Use a sentinel, because None can be a valid
-    # value that this function can return,
-    # as it is the case for unspecified bounds.
-    return _SLICE_SENTINEL
+_SUBSCRIPT_SENTINEL = object()
 
 
 @decorators.raise_if_nothing_inferred
@@ -260,32 +307,26 @@ def infer_subscript(self, context=None):
         yield util.Uninferable
         return
 
+    # Try to deduce the index value.
+    index_value = _SUBSCRIPT_SENTINEL
     if value.__class__ == bases.Instance:
         index_value = index
     else:
-        index_value = _SLICE_SENTINEL
-        if isinstance(index, nodes.Const):
-            index_value = index.value
-        elif isinstance(index, nodes.Slice):
-            # Infer slices from the original object.
-            lower = _slice_value(index.lower, context)
-            upper = _slice_value(index.upper, context)
-            step = _slice_value(index.step, context)
-            if all(elem is not _SLICE_SENTINEL for elem in (lower, upper, step)):
-                index_value = slice(lower, upper, step)
-        elif isinstance(index, bases.Instance):
-            index = helpers.class_instance_as_index(index)
-            if index:
-                index_value = index.value
+        if index.__class__ == bases.Instance:
+            instance_as_index = helpers.class_instance_as_index(index)
+            if instance_as_index:
+                index_value = instance_as_index
         else:
-            raise exceptions.InferenceError(node=self, context=context)
-
-    if index_value is _SLICE_SENTINEL:
+            index_value = index
+    if index_value is _SUBSCRIPT_SENTINEL:
         raise exceptions.InferenceError(node=self, context=context)
 
     try:
         assigned = value.getitem(index_value, context)
-    except (IndexError, TypeError, AttributeError) as exc:
+    except (exceptions.AstroidTypeError,
+            exceptions.AstroidIndexError,
+            exceptions.AttributeInferenceError,
+            AttributeError) as exc:
         util.reraise(exceptions.InferenceError(node=self, error=exc,
                                                context=context))
 
@@ -395,14 +436,20 @@ def _infer_unaryop(self, context=None):
                 else:
                     yield util.Uninferable
             else:
-                if not isinstance(operand, bases.Instance):
+                if not isinstance(operand, (bases.Instance, nodes.ClassDef)):
                     # The operation was used on something which
                     # doesn't support it.
                     yield util.BadUnaryOperationMessage(operand, self.op, exc)
                     continue
 
                 try:
-                    meth = operand.getattr(meth, context=context)[0]
+                    try:
+                        methods = dunder_lookup.lookup(operand, meth)
+                    except exceptions.AttributeInferenceError:
+                        yield util.BadUnaryOperationMessage(operand, self.op, exc)
+                        continue
+
+                    meth = methods[0]
                     inferred = next(meth.infer(context=context))
                     if inferred is util.Uninferable or not inferred.callable():
                         continue
@@ -443,9 +490,10 @@ def _is_not_implemented(const):
     return isinstance(const, nodes.Const) and const.value is NotImplemented
 
 
-def  _invoke_binop_inference(instance, opnode, op, other, context, method_name):
+def _invoke_binop_inference(instance, opnode, op, other, context, method_name):
     """Invoke binary operation inference on the given instance."""
-    method = instance.getattr(method_name)[0]
+    methods = dunder_lookup.lookup(instance, method_name)
+    method = methods[0]
     inferred = next(method.infer(context=context))
     return instance.infer_binary_op(opnode, op, other, context, inferred)
 
@@ -590,7 +638,7 @@ def _infer_binary_operation(left, right, binary_opnode, context, flow_factory):
                 yield util.Uninferable
                 return
 
-            # TODO(cpopa): since the inferrence engine might return
+            # TODO(cpopa): since the inference engine might return
             # more values than are actually possible, we decide
             # to return util.Uninferable if we have union types.
             if all(map(_is_not_implemented, results)):
@@ -635,9 +683,12 @@ def _infer_binop(self, context):
                 yield util.Uninferable
                 return
 
-            results = _infer_binary_operation(lhs, rhs, self, context, _get_binop_flow)
-            for result in results:
-                yield result
+            try:
+                for result in _infer_binary_operation(lhs, rhs, self,
+                                                      context, _get_binop_flow):
+                    yield result
+            except exceptions._NonDeducibleTypeHierarchy:
+                yield util.Uninferable
 
 
 @decorators.yes_if_nothing_inferred
@@ -651,7 +702,7 @@ nodes.BinOp._infer = infer_binop
 
 
 def _infer_augassign(self, context=None):
-    """Inferrence logic for augmented binary operations."""
+    """Inference logic for augmented binary operations."""
     if context is None:
         context = contextmod.InferenceContext()
 
@@ -663,7 +714,7 @@ def _infer_augassign(self, context=None):
 
         # TODO(cpopa): if we have A() * A(), trying to infer
         # the rhs with the same context will result in an
-        # inferrence error, so we create another context for it.
+        # inference error, so we create another context for it.
         # This is a bug which should be fixed in InferenceContext at some point.
         rhs_context = context.clone()
         rhs_context.path = set()
@@ -673,9 +724,13 @@ def _infer_augassign(self, context=None):
                 yield util.Uninferable
                 return
 
-            results = _infer_binary_operation(lhs, rhs, self, context, _get_aug_flow)
-            for result in results:
-                yield result
+            try:
+                results = _infer_binary_operation(lhs, rhs, self, context, _get_aug_flow)
+            except exceptions._NonDeducibleTypeHierarchy:
+                yield util.Uninferable
+            else:
+                for result in results:
+                    yield result
 
 
 @decorators.path_wrapper

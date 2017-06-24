@@ -1,20 +1,12 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2009-2011, 2013-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2014, 2016 Google, Inc.
+# Copyright (c) 2014-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+# Copyright (c) 2016 Jakub Wilk <jwilk@jwilk.net>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """Module for some node classes. More nodes in scoped_nodes.py
 """
 
@@ -24,7 +16,6 @@ import warnings
 try:
     from functools import singledispatch as _singledispatch
 except ImportError:
-    # pylint: disable=import-error
     from singledispatch import singledispatch as _singledispatch
 
 import six
@@ -65,7 +56,7 @@ def unpack_infer(stmt, context=None):
         # Explicit StopIteration to return error information, see comment
         # in raise_if_nothing_inferred.
         raise StopIteration(dict(node=stmt, context=context))
-    # else, infer recursivly, except Uninferable object that should be returned as is
+    # else, infer recursively, except Uninferable object that should be returned as is
     for inferred in stmt.infer(context):
         if inferred is util.Uninferable:
             yield inferred
@@ -113,11 +104,11 @@ def are_exclusive(stmt1, stmt2, exceptions=None): # pylint: disable=redefined-ou
                 c2attr, c2node = node.locate_child(previous)
                 c1attr, c1node = node.locate_child(children[node])
                 if c1node is not c2node:
-                    first_in_body_catched_by_handlers = (
+                    first_in_body_caught_by_handlers = (
                         c2attr == 'handlers'
                         and c1attr == 'body'
                         and previous.catch(exceptions))
-                    second_in_body_catched_by_handlers = (
+                    second_in_body_caught_by_handlers = (
                         c2attr == 'body'
                         and c1attr == 'handlers'
                         and children[node].catch(exceptions))
@@ -125,8 +116,8 @@ def are_exclusive(stmt1, stmt2, exceptions=None): # pylint: disable=redefined-ou
                         c2attr == 'handlers' and c1attr == 'orelse')
                     second_in_else_other_in_handlers = (
                         c2attr == 'orelse' and c1attr == 'handlers')
-                    if any((first_in_body_catched_by_handlers,
-                            second_in_body_catched_by_handlers,
+                    if any((first_in_body_caught_by_handlers,
+                            second_in_body_caught_by_handlers,
                             first_in_else_other_in_handlers,
                             second_in_else_other_in_handlers)):
                         return True
@@ -138,16 +129,73 @@ def are_exclusive(stmt1, stmt2, exceptions=None): # pylint: disable=redefined-ou
     return False
 
 
-def _container_getitem(instance, elts, index):
-    """Get a slice or an item, using the given *index*, for the given sequence."""
-    if isinstance(index, slice):
-        new_cls = instance.__class__()
-        new_cls.elts = elts[index]
-        new_cls.parent = instance.parent
-        return new_cls
-    else:
-        return elts[index]
+# getitem() helpers.
 
+_SLICE_SENTINEL = object()
+
+
+def _slice_value(index, context=None):
+    """Get the value of the given slice index."""
+
+    if isinstance(index, Const):
+        if isinstance(index.value, (int, type(None))):
+            return index.value
+    elif index is None:
+        return None
+    else:
+        # Try to infer what the index actually is.
+        # Since we can't return all the possible values,
+        # we'll stop at the first possible value.
+        try:
+            inferred = next(index.infer(context=context))
+        except exceptions.InferenceError:
+            pass
+        else:
+            if isinstance(inferred, Const):
+                if isinstance(inferred.value, (int, type(None))):
+                    return inferred.value
+
+    # Use a sentinel, because None can be a valid
+    # value that this function can return,
+    # as it is the case for unspecified bounds.
+    return _SLICE_SENTINEL
+
+
+def _infer_slice(node, context=None):
+    lower = _slice_value(node.lower, context)
+    upper = _slice_value(node.upper, context)
+    step = _slice_value(node.step, context)
+    if all(elem is not _SLICE_SENTINEL for elem in (lower, upper, step)):
+        return slice(lower, upper, step)
+
+    raise exceptions.AstroidTypeError(
+        message='Could not infer slice used in subscript',
+        node=node, index=node.parent, context=context)
+
+
+def _container_getitem(instance, elts, index, context=None):
+    """Get a slice or an item, using the given *index*, for the given sequence."""
+    try:
+        if isinstance(index, Slice):
+            index_slice = _infer_slice(index, context=context)
+            new_cls = instance.__class__()
+            new_cls.elts = elts[index_slice]
+            new_cls.parent = instance.parent
+            return new_cls
+        elif isinstance(index, Const):
+            return elts[index.value]
+    except IndexError:
+        util.reraise(exceptions.AstroidIndexError(
+            message='Index {index!s} out of range',
+            node=instance, index=index, context=context))
+    except TypeError as exc:
+        util.reraise(exceptions.AstroidTypeError(
+            message='Type error {error!r}', error=exc,
+            node=instance, index=index, context=context))
+
+    raise exceptions.AstroidTypeError(
+        'Could not use %s as subscript index' % index
+    )
 
 
 class NodeNG(object):
@@ -265,8 +313,8 @@ class NodeNG(object):
                 continue
             if isinstance(attr, (list, tuple)):
                 return attr[-1]
-            else:
-                return attr
+
+            return attr
         return None
 
     def parent_of(self, node):
@@ -365,8 +413,8 @@ class NodeNG(object):
     def fromlineno(self):
         if self.lineno is None:
             return self._fixed_source_line()
-        else:
-            return self.lineno
+
+        return self.lineno
 
     @decorators.cachedproperty
     def tolineno(self):
@@ -377,12 +425,8 @@ class NodeNG(object):
             lastchild = self.last_child()
         if lastchild is None:
             return self.fromlineno
-        else:
-            return lastchild.tolineno
 
-        # TODO / FIXME:
-        assert self.fromlineno is not None, self
-        assert self.tolineno is not None, self
+        return lastchild.tolineno
 
     def _fixed_source_line(self):
         """return the line number where the given node appears
@@ -503,7 +547,7 @@ class NodeNG(object):
             """Outputs a representation of a sequence that's contained within an AST."""
             cur_indent += indent
             result.append('[')
-            if len(node) == 0:
+            if not node:
                 broken = False
             elif len(node) == 1:
                 broken = _repr_tree(node[0], result, done, cur_indent, depth)
@@ -554,7 +598,7 @@ class NodeNG(object):
             fields.extend(node._astroid_fields)
             if ast_state:
                 fields.extend(node._other_other_fields)
-            if len(fields) == 0:
+            if not fields:
                 broken = False
             elif len(fields) == 1:
                 result.append('%s=' % fields[0])
@@ -741,8 +785,8 @@ class LookupMixIn(object):
 
             optional_assign = assign_type.optional_assign
             if optional_assign and assign_type.parent_of(self):
-                # we are inside a loop, loop var assigment is hidding previous
-                # assigment
+                # we are inside a loop, loop var assignment is hiding previous
+                # assignment
                 _stmts = [node]
                 _stmt_parents = [stmt.parent]
                 continue
@@ -759,7 +803,7 @@ class LookupMixIn(object):
                     # both statements are not at the same block level
                     continue
                 # if currently visited node is following previously considered
-                # assignement and both are not exclusive, we can drop the
+                # assignment and both are not exclusive, we can drop the
                 # previous one. For instance in the following code ::
                 #
                 #   if a:
@@ -779,7 +823,7 @@ class LookupMixIn(object):
                 #
                 # moreover, on loop assignment types, assignment won't
                 # necessarily be done if the loop has no iteration, so we don't
-                # want to clear previous assigments if any (hence the test on
+                # want to clear previous assignments if any (hence the test on
                 # optional_assign)
                 if not (optional_assign or are_exclusive(_stmts[pindex], node)):
                     del _stmt_parents[pindex]
@@ -843,7 +887,7 @@ class Arguments(mixins.AssignTypeMixin, NodeNG):
 
         _astroid_fields = ('args', 'defaults', 'kwonlyargs',
                            'kw_defaults', 'annotations', 'varargannotation',
-                           'kwargannotation')
+                           'kwargannotation', 'kwonlyargs_annotations')
         varargannotation = None
         kwargannotation = None
     else:
@@ -859,14 +903,19 @@ class Arguments(mixins.AssignTypeMixin, NodeNG):
         self.kwonlyargs = []
         self.kw_defaults = []
         self.annotations = []
+        self.kwonlyargs_annotations = []
 
     def postinit(self, args, defaults, kwonlyargs, kw_defaults,
-                 annotations, varargannotation=None, kwargannotation=None):
+                 annotations,
+                 kwonlyargs_annotations=None,
+                 varargannotation=None,
+                 kwargannotation=None):
         self.args = args
         self.defaults = defaults
         self.kwonlyargs = kwonlyargs
         self.kw_defaults = kw_defaults
         self.annotations = annotations
+        self.kwonlyargs_annotations = kwonlyargs_annotations
         self.varargannotation = varargannotation
         self.kwargannotation = kwargannotation
 
@@ -893,7 +942,11 @@ class Arguments(mixins.AssignTypeMixin, NodeNG):
         if self.kwonlyargs:
             if not self.vararg:
                 result.append('*')
-            result.append(_format_args(self.kwonlyargs, self.kw_defaults))
+            result.append(_format_args(
+                self.kwonlyargs,
+                self.kw_defaults,
+                self.kwonlyargs_annotations
+            ))
         if self.kwarg:
             result.append('**%s' % self.kwarg)
         return ', '.join(result)
@@ -919,7 +972,8 @@ class Arguments(mixins.AssignTypeMixin, NodeNG):
             return True
         if name == self.kwarg:
             return True
-        return self.find_argname(name, True)[1] is not None
+        return (self.find_argname(name, True)[1] is not None or
+                self.kwonlyargs and _find_arg(name, self.kwonlyargs, True)[1] is not None)
 
     def find_argname(self, argname, rec=False):
         """return index and Name node with given name"""
@@ -1004,6 +1058,23 @@ class Assign(mixins.AssignTypeMixin, Statement):
     def postinit(self, targets=None, value=None):
         self.targets = targets
         self.value = value
+
+
+class AnnAssign(mixins.AssignTypeMixin, Statement):
+    """Class representing an AnnAssign node"""
+
+    _astroid_fields = ('target', 'annotation', 'value',)
+    _other_fields = ('simple',)
+    target = None
+    annotation = None
+    value = None
+    simple = None
+
+    def postinit(self, target, annotation, simple, value=None):
+        self.target = target
+        self.annotation = annotation
+        self.value = value
+        self.simple = simple
 
 
 class AugAssign(mixins.AssignTypeMixin, Statement):
@@ -1148,19 +1219,22 @@ class Compare(NodeNG):
 class Comprehension(NodeNG):
     """class representing a Comprehension node"""
     _astroid_fields = ('target', 'iter', 'ifs')
+    _other_fields = ('is_async',)
     target = None
     iter = None
     ifs = None
+    is_async = None
 
     def __init__(self, parent=None):
         super(Comprehension, self).__init__()
         self.parent = parent
 
     # pylint: disable=redefined-builtin; same name as builtin ast module.
-    def postinit(self, target=None, iter=None, ifs=None):
+    def postinit(self, target=None, iter=None, ifs=None, is_async=None):
         self.target = target
         self.iter = iter
         self.ifs = ifs
+        self.is_async = is_async
 
     optional_assign = True
     def assign_type(self):
@@ -1197,14 +1271,36 @@ class Const(NodeNG, bases.Instance):
         super(Const, self).__init__(lineno, col_offset, parent)
 
     def getitem(self, index, context=None):
-        if isinstance(self.value, six.string_types):
-            return Const(self.value[index])
-        if isinstance(self.value, bytes) and six.PY3:
-            # Bytes aren't instances of six.string_types
-            # on Python 3. Also, indexing them should return
-            # integers.
-            return Const(self.value[index])
-        raise TypeError('%r (value=%s)' % (self, self.value))
+        if isinstance(index, Const):
+            index_value = index.value
+        elif isinstance(index, Slice):
+            index_value = _infer_slice(index, context=context)
+
+        else:
+            raise exceptions.AstroidTypeError(
+                'Could not use type {} as subscript index'.format(type(index))
+            )
+
+        try:
+            if isinstance(self.value, six.string_types):
+                return Const(self.value[index_value])
+            if isinstance(self.value, bytes) and six.PY3:
+                # Bytes aren't instances of six.string_types
+                # on Python 3. Also, indexing them should return
+                # integers.
+                return Const(self.value[index_value])
+        except IndexError as exc:
+            util.reraise(exceptions.AstroidIndexError(
+                message='Index {index!r} out of range', error=exc,
+                node=self, index=index, context=context))
+        except TypeError as exc:
+            util.reraise(exceptions.AstroidTypeError(
+                message='Type error {error!r}', error=exc,
+                node=self, index=index, context=context))
+
+        raise exceptions.AstroidTypeError(
+            '%r (value=%s)' % (self, self.value)
+        )
 
     def has_dynamic_getattr(self):
         return False
@@ -1301,23 +1397,22 @@ class Dict(NodeNG, bases.Instance):
     def itered(self):
         return self.items[::2]
 
-    def getitem(self, lookup_key, context=None):
+    def getitem(self, index, context=None):
         for key, value in self.items:
             # TODO(cpopa): no support for overriding yet, {1:2, **{1: 3}}.
             if isinstance(key, DictUnpack):
                 try:
-                    return value.getitem(lookup_key, context)
-                except IndexError:
+                    return value.getitem(index, context)
+                except (exceptions.AstroidTypeError, exceptions.AstroidIndexError):
                     continue
             for inferredkey in key.infer(context):
                 if inferredkey is util.Uninferable:
                     continue
-                if isinstance(inferredkey, Const) \
-                        and inferredkey.value == lookup_key:
-                    return value
-        # This should raise KeyError, but all call sites only catch
-        # IndexError. Let's leave it like that for now.
-        raise IndexError(lookup_key)
+                if isinstance(inferredkey, Const) and isinstance(index, Const):
+                    if inferredkey.value == index.value:
+                        return value
+
+        raise exceptions.AstroidIndexError(index)
 
     def bool_value(self):
         return bool(self.items)
@@ -1364,8 +1459,8 @@ class ExceptHandler(mixins.AssignTypeMixin, Statement):
             return self.name.tolineno
         elif self.type:
             return self.type.tolineno
-        else:
-            return self.lineno
+
+        return self.lineno
 
     def catch(self, exceptions): # pylint: disable=redefined-outer-name
         if self.type is None or exceptions is None:
@@ -1555,7 +1650,7 @@ class List(_BaseContainer):
         return '%s.list' % BUILTINS
 
     def getitem(self, index, context=None):
-        return _container_getitem(self, self.elts, index)
+        return _container_getitem(self, self.elts, index, context=context)
 
 
 class Nonlocal(Statement):
@@ -1772,7 +1867,7 @@ class Tuple(_BaseContainer):
         return '%s.tuple' % BUILTINS
 
     def getitem(self, index, context=None):
-        return _container_getitem(self, self.elts, index)
+        return _container_getitem(self, self.elts, index, context=context)
 
 
 class UnaryOp(NodeNG):
@@ -1823,7 +1918,7 @@ class While(mixins.BlockRangeMixIn, Statement):
         return self.test.tolineno
 
     def block_range(self, lineno):
-        """handle block line numbers range for for and while statements"""
+        """handle block line numbers range for and while statements"""
         return self. _elsed_block_range(lineno, self.orelse)
 
 
@@ -1869,6 +1964,39 @@ class YieldFrom(Yield):
 
 class DictUnpack(NodeNG):
     """Represents the unpacking of dicts into dicts using PEP 448."""
+
+
+class FormattedValue(NodeNG):
+    """Represents a PEP 498 format string."""
+    _astroid_fields = ('value', 'format_spec')
+    value = None
+    conversion = None
+    format_spec = None
+
+    def postinit(self, value, conversion=None, format_spec=None):
+        self.value = value
+        self.conversion = conversion
+        self.format_spec = format_spec
+
+
+class JoinedStr(NodeNG):
+    """Represents a list of string expressions to be joined."""
+    _astroid_fields = ('values',)
+    values = None
+
+    def postinit(self, values=None):
+        self.values = values
+
+
+class Unknown(NodeNG):
+    '''This node represents a node in a constructed AST where
+    introspection is not possible.  At the moment, it's only used in
+    the args attribute of FunctionDef nodes where function signature
+    introspection failed.
+    '''
+    def infer(self, context=None, **kwargs):
+        '''Inference on an Unknown node immediately terminates.'''
+        yield util.Uninferable
 
 
 # constants ##############################################################

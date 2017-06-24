@@ -1,20 +1,12 @@
-# copyright 2003-2013 LOGILAB S.A. (Paris, FRANCE), all rights reserved.
-# contact http://www.logilab.fr/ -- mailto:contact@logilab.fr
-#
-# This file is part of astroid.
-#
-# astroid is free software: you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by the
-# Free Software Foundation, either version 2.1 of the License, or (at your
-# option) any later version.
-#
-# astroid is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-# for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License along
-# with astroid. If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2006-2007, 2009-2014 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
+# Copyright (c) 2013-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Google, Inc.
+# Copyright (c) 2015 Florian Bruhin <me@the-compiler.org>
+# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """tests for specific behaviour of astroid nodes
 """
 import os
@@ -64,7 +56,7 @@ class AsStringTest(resources.SysPathSetup, unittest.TestCase):
         self.assertEqual(node.as_string().strip(), code.strip())
 
     def test_as_string_for_list_containing_uninferable(self):
-        node = test_utils.extract_node('''
+        node = builder.extract_node('''
         def foo():
             bar = [arg] * 1
         ''')
@@ -74,7 +66,7 @@ class AsStringTest(resources.SysPathSetup, unittest.TestCase):
         self.assertEqual(binop.as_string(), '([arg]) * (1)')
 
     def test_frozenset_as_string(self):
-        ast_nodes = test_utils.extract_node('''
+        ast_nodes = builder.extract_node('''
         frozenset((1, 2, 3)) #@
         frozenset({1, 2, 3}) #@
         frozenset([1, 2, 3,]) #@
@@ -452,7 +444,7 @@ class ConstNodeTest(unittest.TestCase):
 
 class NameNodeTest(unittest.TestCase):
     def test_assign_to_True(self):
-        """test that True and False assignements don't crash"""
+        """test that True and False assignments don't crash"""
         code = """
             True = False
             def hello(False):
@@ -470,6 +462,53 @@ class NameNodeTest(unittest.TestCase):
             del_true = ast.body[2].targets[0]
             self.assertIsInstance(del_true, nodes.DelName)
             self.assertEqual(del_true.name, "True")
+
+
+class AnnAssignNodeTest(unittest.TestCase):
+    @test_utils.require_version(minver='3.6')
+    def test_primitive(self):
+        code = textwrap.dedent("""
+            test: int = 5
+        """)
+        assign = builder.extract_node(code)
+        self.assertIsInstance(assign, nodes.AnnAssign)
+        self.assertEqual(assign.target.name, "test")
+        self.assertEqual(assign.annotation.name, "int")
+        self.assertEqual(assign.value.value, 5)
+        self.assertEqual(assign.simple, 1)
+
+    @test_utils.require_version(minver='3.6')
+    def test_primitive_without_initial_value(self):
+        code = textwrap.dedent("""
+            test: str
+        """)
+        assign = builder.extract_node(code)
+        self.assertIsInstance(assign, nodes.AnnAssign)
+        self.assertEqual(assign.target.name, "test")
+        self.assertEqual(assign.annotation.name, "str")
+        self.assertEqual(assign.value, None)
+
+    @test_utils.require_version(minver='3.6')
+    def test_complex(self):
+        code = textwrap.dedent("""
+            test: Dict[List[str]] = {}
+        """)
+        assign = builder.extract_node(code)
+        self.assertIsInstance(assign, nodes.AnnAssign)
+        self.assertEqual(assign.target.name, "test")
+        self.assertIsInstance(assign.annotation, astroid.Subscript)
+        self.assertIsInstance(assign.value, astroid.Dict)
+
+    @test_utils.require_version(minver='3.6')
+    def test_as_string(self):
+        code = textwrap.dedent("""
+            print()
+            test: int = 5
+            test2: str
+            test3: List[Dict[(str, str)]] = []
+        """)
+        ast = abuilder.string_build(code)
+        self.assertEqual(ast.as_string().strip(), code.strip())
 
 
 class ArgumentsNodeTC(unittest.TestCase):
@@ -491,13 +530,14 @@ class ArgumentsNodeTC(unittest.TestCase):
             self.skipTest('FIXME  http://bugs.python.org/issue10445 '
                           '(no line number on function args)')
 
-    def test_builtin_fromlineno_missing(self):
-        cls = test_utils.extract_node('''
-        class Foo(Exception): #@
-            pass
+    @test_utils.require_version(minver='3.0')
+    def test_kwoargs(self):
+        ast = builder.parse('''
+            def func(*, x):
+                pass
         ''')
-        new = cls.getattr('__new__')[-1]
-        self.assertEqual(new.args.fromlineno, 0)
+        args = ast['func'].args
+        self.assertTrue(args.is_argument('x'))
 
 
 class UnboundMethodNodeTest(unittest.TestCase):
@@ -723,7 +763,7 @@ class DeprecationWarningsTest(unittest.TestCase):
 class Python35AsyncTest(unittest.TestCase):
 
     def test_async_await_keywords(self):
-        async_def, async_for, async_with, await_node = test_utils.extract_node('''
+        async_def, async_for, async_with, await_node = builder.extract_node('''
         async def func(): #@
             async for i in range(10): #@
                 f = __(await i)
@@ -767,47 +807,47 @@ class Python35AsyncTest(unittest.TestCase):
 class ContextTest(unittest.TestCase):
 
     def test_subscript_load(self):
-        node = test_utils.extract_node('f[1]')
+        node = builder.extract_node('f[1]')
         self.assertIs(node.ctx, astroid.Load)
 
     def test_subscript_del(self):
-        node = test_utils.extract_node('del f[1]')
+        node = builder.extract_node('del f[1]')
         self.assertIs(node.targets[0].ctx, astroid.Del)
 
     def test_subscript_store(self):
-        node = test_utils.extract_node('f[1] = 2')
+        node = builder.extract_node('f[1] = 2')
         subscript = node.targets[0]
         self.assertIs(subscript.ctx, astroid.Store)
 
     def test_list_load(self):
-        node = test_utils.extract_node('[]')
+        node = builder.extract_node('[]')
         self.assertIs(node.ctx, astroid.Load)
 
     def test_list_del(self):
-        node = test_utils.extract_node('del []')
+        node = builder.extract_node('del []')
         self.assertIs(node.targets[0].ctx, astroid.Del)
 
     def test_list_store(self):
         with self.assertRaises(exceptions.AstroidSyntaxError):
-            test_utils.extract_node('[0] = 2')
+            builder.extract_node('[0] = 2')
 
     def test_tuple_load(self):
-        node = test_utils.extract_node('(1, )')
+        node = builder.extract_node('(1, )')
         self.assertIs(node.ctx, astroid.Load)
 
     def test_tuple_store(self):
         with self.assertRaises(exceptions.AstroidSyntaxError):
-            test_utils.extract_node('(1, ) = 3')
+            builder.extract_node('(1, ) = 3')
 
     @test_utils.require_version(minver='3.5')
     def test_starred_load(self):
-        node = test_utils.extract_node('a = *b')
+        node = builder.extract_node('a = *b')
         starred = node.value
         self.assertIs(starred.ctx, astroid.Load)
 
     @test_utils.require_version(minver='3.0')
     def test_starred_store(self):
-        node = test_utils.extract_node('a, *b = 1, 2')
+        node = builder.extract_node('a, *b = 1, 2')
         starred = node.targets[0].elts[1]
         self.assertIs(starred.ctx, astroid.Store)
 

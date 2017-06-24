@@ -99,10 +99,13 @@ disable=fixme,invalid-name, missing-docstring, too-few-public-methods,
         # all over the place changes the aesthetics when these methods
         # are following a local pattern (visit methods for instance).
         no-self-use,
-        # API requirements in most of the occurences
+        # API requirements in most of the occurrences
         unused-argument,
         # Not very useful when it warns about imports.
         duplicate-code,
+        # Don't care about these two too much
+        wrong-import-order,
+        wrong-import-position
 
 
 [BASIC]
@@ -268,6 +271,7 @@ spelling-store-unknown-words=no
 
 [TYPECHECK]
 
+ignore-on-opaque-inference=n
 # Tells whether missing members accessed in mixin class should be ignored. A
 # mixin class is detected if its name ends with "mixin" (case insensitive).
 ignore-mixin-members=yes

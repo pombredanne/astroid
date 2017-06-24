@@ -1,3 +1,8 @@
+# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+
+# Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
+# For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
+
 """Astroid hooks for the PyQT library."""
 
 from astroid import MANAGER, register_module_extender
@@ -8,8 +13,12 @@ from astroid import parse
 
 def _looks_like_signal(node, signal_name='pyqtSignal'):
     if '__class__' in node.instance_attrs:
-        cls = node.instance_attrs['__class__'][0]
-        return cls.name == signal_name
+        try:
+            cls = node.instance_attrs['__class__'][0]
+            return cls.name == signal_name
+        except AttributeError:
+            # return False if the cls does not have a name attribute
+            pass
     return False
 
 
