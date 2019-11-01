@@ -1,6 +1,11 @@
 # Copyright (c) 2006-2013, 2015 LOGILAB S.A. (Paris, FRANCE) <contact@logilab.fr>
 # Copyright (c) 2014 Google, Inc.
-# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2014 Eevee (Alex Munroe) <amunroe@yelp.com>
+# Copyright (c) 2015-2016, 2018 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016 Ceridwen <ceridwenv@gmail.com>
+# Copyright (c) 2016 Derek Gustafson <degustaf@gmail.com>
+# Copyright (c) 2016 Moises Lopez <moylop260@vauxoo.com>
+# Copyright (c) 2018 Bryce Guinta <bryce.paul.guinta@gmail.com>
 
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 # For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
@@ -30,15 +35,15 @@ Main modules are:
 * builder contains the class responsible to build astroid trees
 """
 
+import enum
+import itertools
 import os
 import sys
-import re
-from operator import attrgetter
 
-import enum
+import wrapt
 
 
-_Context = enum.Enum('Context', 'Load Store Del')
+_Context = enum.Enum("Context", "Load Store Del")
 Load = _Context.Load
 Store = _Context.Store
 Del = _Context.Del
@@ -46,9 +51,10 @@ del _Context
 
 
 from .__pkginfo__ import version as __version__
+
 # WARNING: internal imports order matters !
 
-# pylint: disable=redefined-builtin, wildcard-import
+# pylint: disable=redefined-builtin
 
 # make all exception classes accessible from astroid package
 from astroid.exceptions import *
@@ -65,41 +71,41 @@ from astroid.bases import BaseInstance, Instance, BoundMethod, UnboundMethod
 from astroid.node_classes import are_exclusive, unpack_infer
 from astroid.scoped_nodes import builtin_lookup
 from astroid.builder import parse, extract_node
-from astroid.util import Uninferable, YES
+from astroid.util import Uninferable
 
 # make a manager instance (borg) accessible from astroid package
 from astroid.manager import AstroidManager
+
 MANAGER = AstroidManager()
 del AstroidManager
 
 # transform utilities (filters and decorator)
 
-class AsStringRegexpPredicate(object):
-    """ClassDef to be used as predicate that may be given to `register_transform`
 
-    First argument is a regular expression that will be searched against the `as_string`
-    representation of the node onto which it's applied.
+# pylint: disable=dangerous-default-value
+@wrapt.decorator
+def _inference_tip_cached(func, instance, args, kwargs, _cache={}):
+    """Cache decorator used for inference tips"""
+    node = args[0]
+    try:
+        return iter(_cache[func, node])
+    except KeyError:
+        result = func(*args, **kwargs)
+        # Need to keep an iterator around
+        original, copy = itertools.tee(result)
+        _cache[func, node] = list(copy)
+        return original
 
-    If specified, the second argument is an `attrgetter` expression that will be
-    applied on the node first to get the actual node on which `as_string` should
-    be called.
 
-    WARNING: This can be fairly slow, as it has to convert every AST node back
-    to Python code; you should consider examining the AST directly instead.
-    """
-    def __init__(self, regexp, expression=None):
-        self.regexp = re.compile(regexp)
-        self.expression = expression
+# pylint: enable=dangerous-default-value
 
-    def __call__(self, node):
-        if self.expression is not None:
-            node = attrgetter(self.expression)(node)
-        # pylint: disable=no-member; github.com/pycqa/astroid/126
-        return self.regexp.search(node.as_string())
 
-def inference_tip(infer_function):
+def inference_tip(infer_function, raise_on_overwrite=False):
     """Given an instance specific inference function, return a function to be
     given to MANAGER.register_transform to set this inference function.
+
+    :param bool raise_on_overwrite: Raise an `InferenceOverwriteError`
+        if the inference tip will overwrite another. Used for debugging
 
     Typical usage
 
@@ -107,10 +113,33 @@ def inference_tip(infer_function):
 
        MANAGER.register_transform(Call, inference_tip(infer_named_tuple),
                                   predicate)
+
+    .. Note::
+
+        Using an inference tip will override
+        any previously set inference tip for the given
+        node. Use a predicate in the transform to prevent
+        excess overwrites.
     """
+
     def transform(node, infer_function=infer_function):
-        node._explicit_inference = infer_function
+        if (
+            raise_on_overwrite
+            and node._explicit_inference is not None
+            and node._explicit_inference is not infer_function
+        ):
+            raise InferenceOverwriteError(
+                "Inference already set to {existing_inference}. "
+                "Trying to overwrite with {new_inference} for {node}".format(
+                    existing_inference=infer_function,
+                    new_inference=node._explicit_inference,
+                    node=node,
+                )
+            )
+        # pylint: disable=no-value-for-parameter
+        node._explicit_inference = _inference_tip_cached(infer_function)
         return node
+
     return transform
 
 
@@ -127,11 +156,11 @@ def register_module_extender(manager, module_name, get_extension_mod):
 
 
 # load brain plugins
-BRAIN_MODULES_DIR = os.path.join(os.path.dirname(__file__), 'brain')
+BRAIN_MODULES_DIR = os.path.join(os.path.dirname(__file__), "brain")
 if BRAIN_MODULES_DIR not in sys.path:
     # add it to the end of the list so user path take precedence
     sys.path.append(BRAIN_MODULES_DIR)
 # load modules in this directory
 for module in os.listdir(BRAIN_MODULES_DIR):
-    if module.endswith('.py'):
+    if module.endswith(".py"):
         __import__(module[:-3])

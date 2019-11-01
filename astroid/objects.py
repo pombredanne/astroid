@@ -1,5 +1,8 @@
-# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
-# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016, 2018 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016 Ceridwen <ceridwenv@gmail.com>
+# Copyright (c) 2015 Florian Bruhin <me@the-compiler.org>
+# Copyright (c) 2016 Derek Gustafson <degustaf@gmail.com>
+# Copyright (c) 2018 Bryce Guinta <bryce.paul.guinta@gmail.com>
 
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 # For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
@@ -14,7 +17,7 @@ leads to an inferred FrozenSet:
     Call(func=Name('frozenset'), args=Tuple(...))
 """
 
-import six
+import builtins
 
 from astroid import bases
 from astroid import decorators
@@ -25,23 +28,23 @@ from astroid import scoped_nodes
 from astroid import util
 
 
-BUILTINS = six.moves.builtins.__name__
-objectmodel = util.lazy_import('interpreter.objectmodel')
+BUILTINS = builtins.__name__
+objectmodel = util.lazy_import("interpreter.objectmodel")
 
 
 class FrozenSet(node_classes._BaseContainer):
     """class representing a FrozenSet composite node"""
 
     def pytype(self):
-        return '%s.frozenset' % BUILTINS
+        return "%s.frozenset" % BUILTINS
 
     def _infer(self, context=None):
         yield self
 
     @decorators.cachedproperty
-    def _proxied(self): # pylint: disable=method-hidden
-        builtins = MANAGER.astroid_cache[BUILTINS]
-        return builtins.getattr('frozenset')[0]
+    def _proxied(self):  # pylint: disable=method-hidden
+        ast_builtins = MANAGER.builtins_module
+        return ast_builtins.getattr("frozenset")[0]
 
 
 class Super(node_classes.NodeNG):
@@ -56,6 +59,7 @@ class Super(node_classes.NodeNG):
     *self_class* is the class where the super call is, while
     *scope* is the function where the super call is.
     """
+
     # pylint: disable=unnecessary-lambda
     special_attributes = util.lazy_descriptor(lambda: objectmodel.SuperModel())
 
@@ -75,48 +79,57 @@ class Super(node_classes.NodeNG):
         if not isinstance(self.mro_pointer, scoped_nodes.ClassDef):
             raise exceptions.SuperError(
                 "The first argument to super must be a subtype of "
-                "type, not {mro_pointer}.", super_=self)
+                "type, not {mro_pointer}.",
+                super_=self,
+            )
 
         if isinstance(self.type, scoped_nodes.ClassDef):
             # `super(type, type)`, most likely in a class method.
             self._class_based = True
             mro_type = self.type
         else:
-            mro_type = getattr(self.type, '_proxied', None)
+            mro_type = getattr(self.type, "_proxied", None)
             if not isinstance(mro_type, (bases.Instance, scoped_nodes.ClassDef)):
                 raise exceptions.SuperError(
                     "The second argument to super must be an "
                     "instance or subtype of type, not {type}.",
-                    super_=self)
+                    super_=self,
+                )
 
         if not mro_type.newstyle:
-            raise exceptions.SuperError("Unable to call super on old-style classes.", super_=self)
+            raise exceptions.SuperError(
+                "Unable to call super on old-style classes.", super_=self
+            )
 
         mro = mro_type.mro()
         if self.mro_pointer not in mro:
             raise exceptions.SuperError(
                 "The second argument to super must be an "
                 "instance or subtype of type, not {type}.",
-                super_=self)
+                super_=self,
+            )
 
         index = mro.index(self.mro_pointer)
-        return mro[index + 1:]
+        return mro[index + 1 :]
 
     @decorators.cachedproperty
     def _proxied(self):
-        builtins = MANAGER.astroid_cache[BUILTINS]
-        return builtins.getattr('super')[0]
+        ast_builtins = MANAGER.builtins_module
+        return ast_builtins.getattr("super")[0]
 
     def pytype(self):
-        return '%s.super' % BUILTINS
+        return "%s.super" % BUILTINS
 
     def display_type(self):
-        return 'Super of'
+        return "Super of"
 
     @property
     def name(self):
         """Get the name of the MRO pointer."""
         return self.mro_pointer.name
+
+    def qname(self):
+        return "super"
 
     def igetattr(self, name, context=None):
         """Retrieve the inferred values of the given attribute name."""
@@ -130,16 +143,28 @@ class Super(node_classes.NodeNG):
         # Don't let invalid MROs or invalid super calls
         # leak out as is from this function.
         except exceptions.SuperError as exc:
-            util.reraise(exceptions.AttributeInferenceError(
-                ('Lookup for {name} on {target!r} because super call {super!r} '
-                 'is invalid.'),
-                target=self, attribute=name, context=context, super_=exc.super_))
+            raise exceptions.AttributeInferenceError(
+                (
+                    "Lookup for {name} on {target!r} because super call {super!r} "
+                    "is invalid."
+                ),
+                target=self,
+                attribute=name,
+                context=context,
+                super_=exc.super_,
+            ) from exc
         except exceptions.MroError as exc:
-            util.reraise(exceptions.AttributeInferenceError(
-                ('Lookup for {name} on {target!r} failed because {cls!r} has an '
-                 'invalid MRO.'),
-                target=self, attribute=name, context=context, mros=exc.mros,
-                cls=exc.cls))
+            raise exceptions.AttributeInferenceError(
+                (
+                    "Lookup for {name} on {target!r} failed because {cls!r} has an "
+                    "invalid MRO."
+                ),
+                target=self,
+                attribute=name,
+                context=context,
+                mros=exc.mros,
+                cls=exc.cls,
+            ) from exc
         found = False
         for cls in mro:
             if name not in cls.locals:
@@ -153,23 +178,25 @@ class Super(node_classes.NodeNG):
 
                 # We can obtain different descriptors from a super depending
                 # on what we are accessing and where the super call is.
-                if inferred.type == 'classmethod':
+                if inferred.type == "classmethod":
                     yield bases.BoundMethod(inferred, cls)
-                elif self._scope.type == 'classmethod' and inferred.type == 'method':
+                elif self._scope.type == "classmethod" and inferred.type == "method":
                     yield inferred
-                elif self._class_based or inferred.type == 'staticmethod':
+                elif self._class_based or inferred.type == "staticmethod":
                     yield inferred
                 elif bases._is_property(inferred):
                     # TODO: support other descriptors as well.
-                    for value in inferred.infer_call_result(self, context):
-                        yield value
+                    try:
+                        yield from inferred.infer_call_result(self, context)
+                    except exceptions.InferenceError:
+                        yield util.Uninferable
                 else:
                     yield bases.BoundMethod(inferred, cls)
 
         if not found:
-            raise exceptions.AttributeInferenceError(target=self,
-                                                     attribute=name,
-                                                     context=context)
+            raise exceptions.AttributeInferenceError(
+                target=self, attribute=name, context=context
+            )
 
     def getattr(self, name, context=None):
         return list(self.igetattr(name, context=context))
@@ -183,8 +210,13 @@ class ExceptionInstance(bases.Instance):
     the case of .args.
     """
 
-    # pylint: disable=unnecessary-lambda
-    special_attributes = util.lazy_descriptor(lambda: objectmodel.ExceptionInstanceModel())
+    @decorators.cachedproperty
+    def special_attributes(self):
+        qname = self.qname()
+        instance = objectmodel.BUILTIN_EXCEPTIONS.get(
+            qname, objectmodel.ExceptionInstanceModel
+        )
+        return instance()(self)
 
 
 class DictInstance(bases.Instance):
@@ -214,6 +246,36 @@ class DictKeys(bases.Proxy):
 class DictValues(bases.Proxy):
     __str__ = node_classes.NodeNG.__str__
     __repr__ = node_classes.NodeNG.__repr__
+
+
+class PartialFunction(scoped_nodes.FunctionDef):
+    """A class representing partial function obtained via functools.partial"""
+
+    def __init__(
+        self, call, name=None, doc=None, lineno=None, col_offset=None, parent=None
+    ):
+        super().__init__(name, doc, lineno, col_offset, parent)
+        self.filled_positionals = len(call.positional_arguments[1:])
+        self.filled_args = call.positional_arguments[1:]
+        self.filled_keywords = call.keyword_arguments
+
+    def infer_call_result(self, caller=None, context=None):
+        if context:
+            current_passed_keywords = {
+                keyword for (keyword, _) in context.callcontext.keywords
+            }
+            for keyword, value in self.filled_keywords.items():
+                if keyword not in current_passed_keywords:
+                    context.callcontext.keywords.append((keyword, value))
+
+            call_context_args = context.callcontext.args or []
+            context.callcontext.args = self.filled_args + call_context_args
+
+        return super().infer_call_result(caller=caller, context=context)
+
+    def qname(self):
+        return self.__class__.__name__
+
 
 # TODO: Hack to solve the circular import problem between node_classes and objects
 # This is not needed in 2.0, which has a cleaner design overall

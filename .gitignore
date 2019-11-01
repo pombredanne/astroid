@@ -6,6 +6,10 @@ log
 build
 dist/
 astroid.egg-info/
+.idea
 .tox
 .coverage
 .coverage.*
+.cache/
+.eggs/
+.pytest_cache/

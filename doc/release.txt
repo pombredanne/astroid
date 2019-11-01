@@ -7,17 +7,25 @@ Release Process
    3. Put the version number and the release date into the changelog
    4. Submit your changes.
 
-2. Make sure the tests are passing on drone.io:
-   https://drone.io/bitbucket.org/logilab/astroid
+2. If releasing a major or minor version, generate the new copyright notices for this release:
 
-3. Add a new tag 'astroid-$VERSION'
+ $ copyrite --contribution-threshold 1 --change-threshold 3 --backend-type git --aliases=.copyrite_aliases . --jobs=8
 
-5. Publish all remaining changes to the Bitbucket repository:
-   https://bitbucket.org/logilab/astroid
+3. Make sure the tests are passing on Travis:
+   https://travis-ci.org/PyCQA/astroid/
 
-4. Run
+4. Add a new tag 'astroid-$VERSION'
+
+5. Publish all remaining changes to the Github repository:
+   https://github.com/PyCQA/astroid
+
+6. Run
    
-   $ python setup.py register sdist --formats=gztar bdist_wheel upload
+   $ git clean -fd && find . -name '*.pyc' -delete
+   $ rm dist/*
+   $ python setup.py sdist --formats=gztar bdist_wheel
+   $ twine upload dist/*
+
 
    to release a new version to PyPI.
   

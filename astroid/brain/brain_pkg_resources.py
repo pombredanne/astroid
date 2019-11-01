@@ -1,4 +1,5 @@
-# Copyright (c) 2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2016, 2018 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2016 Ceridwen <ceridwenv@gmail.com>
 
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 # For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
@@ -12,7 +13,8 @@ from astroid import MANAGER
 
 
 def pkg_resources_transform():
-    return parse('''
+    return parse(
+        """
 def require(*requirements):
     return pkg_resources.working_set.require(*requirements)
 
@@ -65,6 +67,9 @@ def cleanup_resources(force=False):
 def get_distribution(dist):
     return Distribution(dist)
 
-''')
+_namespace_packages = {}
+"""
+    )
 
-register_module_extender(MANAGER, 'pkg_resources', pkg_resources_transform)
+
+register_module_extender(MANAGER, "pkg_resources", pkg_resources_transform)

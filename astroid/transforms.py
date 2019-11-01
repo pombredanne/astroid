@@ -1,14 +1,16 @@
-# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016, 2018 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2016 Ceridwen <ceridwenv@gmail.com>
+# Copyright (c) 2018 Nick Drozd <nicholasdrozd@gmail.com>
 
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 # For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
 
 
 import collections
-import warnings
+from functools import lru_cache
 
 
-class TransformVisitor(object):
+class TransformVisitor:
     """A visitor for handling transforms.
 
     The standard approach of using it is to call
@@ -17,9 +19,12 @@ class TransformVisitor(object):
     transforms for each encountered node.
     """
 
+    TRANSFORM_MAX_CACHE_SIZE = 10000
+
     def __init__(self):
         self.transforms = collections.defaultdict(list)
 
+    @lru_cache(maxsize=TRANSFORM_MAX_CACHE_SIZE)
     def _transform(self, node):
         """Call matching transforms for the given node if any and return the
         transformed node.
@@ -30,33 +35,34 @@ class TransformVisitor(object):
             return node
 
         transforms = self.transforms[cls]
-        orig_node = node  # copy the reference
         for transform_func, predicate in transforms:
             if predicate is None or predicate(node):
                 ret = transform_func(node)
                 # if the transformation function returns something, it's
                 # expected to be a replacement for the node
                 if ret is not None:
-                    if node is not orig_node:
-                        # node has already be modified by some previous
-                        # transformation, warn about it
-                        warnings.warn('node %s substituted multiple times' % node)
                     node = ret
+                if ret.__class__ != cls:
+                    # Can no longer apply the rest of the transforms.
+                    break
         return node
 
     def _visit(self, node):
-        if hasattr(node, '_astroid_fields'):
-            for field in node._astroid_fields:
-                value = getattr(node, field)
+        if hasattr(node, "_astroid_fields"):
+            for name in node._astroid_fields:
+                value = getattr(node, name)
                 visited = self._visit_generic(value)
-                setattr(node, field, visited)
+                if visited != value:
+                    setattr(node, name, visited)
         return self._transform(node)
 
     def _visit_generic(self, node):
         if isinstance(node, list):
             return [self._visit_generic(child) for child in node]
-        elif isinstance(node, tuple):
+        if isinstance(node, tuple):
             return tuple(self._visit_generic(child) for child in node)
+        if not node or isinstance(node, str):
+            return node
 
         return self._visit(node)
 

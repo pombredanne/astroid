@@ -1,48 +1,47 @@
-# Copyright (c) 2015-2016 Cara Vinson <ceridwenv@gmail.com>
-# Copyright (c) 2015-2016 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2018 Claudiu Popa <pcmanticore@gmail.com>
+# Copyright (c) 2015-2016 Ceridwen <ceridwenv@gmail.com>
+# Copyright (c) 2018 Bryce Guinta <bryce.paul.guinta@gmail.com>
+# Copyright (c) 2018 Nick Drozd <nicholasdrozd@gmail.com>
 
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
 # For details: https://github.com/PyCQA/astroid/blob/master/COPYING.LESSER
 
-import sys
 import warnings
+from itertools import islice
 
 import importlib
 import lazy_object_proxy
-import six
 
 
 def lazy_descriptor(obj):
     class DescriptorProxy(lazy_object_proxy.Proxy):
         def __get__(self, instance, owner=None):
             return self.__class__.__get__(self, instance)
+
     return DescriptorProxy(obj)
 
 
 def lazy_import(module_name):
     return lazy_object_proxy.Proxy(
-        lambda: importlib.import_module('.' + module_name, 'astroid'))
-
-
-def reraise(exception):
-    '''Reraises an exception with the traceback from the current exception
-    block.'''
-    six.reraise(type(exception), exception, sys.exc_info()[2])
+        lambda: importlib.import_module("." + module_name, "astroid")
+    )
 
 
 @object.__new__
-class Uninferable(object):
+class Uninferable:
     """Special inference object, which is returned when inference fails."""
+
     def __repr__(self):
-        return 'Uninferable'
+        return "Uninferable"
+
     __str__ = __repr__
 
     def __getattribute__(self, name):
-        if name == 'next':
-            raise AttributeError('next method should not be called')
-        if name.startswith('__') and name.endswith('__'):
+        if name == "next":
+            raise AttributeError("next method should not be called")
+        if name.startswith("__") and name.endswith("__"):
             return object.__getattribute__(self, name)
-        if name == 'accept':
+        if name == "accept":
             return object.__getattribute__(self, name)
         return self
 
@@ -58,7 +57,8 @@ class Uninferable(object):
         func = getattr(visitor, "visit_uninferable")
         return func(self)
 
-class BadOperationMessage(object):
+
+class BadOperationMessage:
     """Object which describes a TypeError occurred somewhere in the inference chain
 
     This is not an exception, but a container object which holds the types and
@@ -74,8 +74,30 @@ class BadUnaryOperationMessage(BadOperationMessage):
         self.op = op
         self.error = error
 
+    @property
+    def _object_type_helper(self):
+        helpers = lazy_import("helpers")
+        return helpers.object_type
+
+    def _object_type(self, obj):
+        # pylint: disable=not-callable; can't infer lazy_import
+        objtype = self._object_type_helper(obj)
+        if objtype is Uninferable:
+            return None
+
+        return objtype
+
     def __str__(self):
-        operand_type = self.operand.name
+        if hasattr(self.operand, "name"):
+            operand_type = self.operand.name
+        else:
+            object_type = self._object_type(self.operand)
+            if hasattr(object_type, "name"):
+                operand_type = object_type.name
+            else:
+                # Just fallback to as_string
+                operand_type = object_type.as_string()
+
         msg = "bad operand type for unary {}: {}"
         return msg.format(self.op, operand_type)
 
@@ -97,20 +119,46 @@ def _instancecheck(cls, other):
     wrapped = cls.__wrapped__
     other_cls = other.__class__
     is_instance_of = wrapped is other_cls or issubclass(other_cls, wrapped)
-    warnings.warn("%r is deprecated and slated for removal in astroid "
-                  "2.0, use %r instead" % (cls.__class__.__name__,
-                                           wrapped.__name__),
-                  PendingDeprecationWarning, stacklevel=2)
+    warnings.warn(
+        "%r is deprecated and slated for removal in astroid "
+        "2.0, use %r instead" % (cls.__class__.__name__, wrapped.__name__),
+        PendingDeprecationWarning,
+        stacklevel=2,
+    )
     return is_instance_of
 
 
 def proxy_alias(alias_name, node_type):
     """Get a Proxy from the given name to the given node type."""
-    proxy = type(alias_name, (lazy_object_proxy.Proxy,),
-                 {'__class__': object.__dict__['__class__'],
-                  '__instancecheck__': _instancecheck})
+    proxy = type(
+        alias_name,
+        (lazy_object_proxy.Proxy,),
+        {
+            "__class__": object.__dict__["__class__"],
+            "__instancecheck__": _instancecheck,
+        },
+    )
     return proxy(lambda: node_type)
 
 
-# Backwards-compatibility aliases
-YES = Uninferable
+def limit_inference(iterator, size):
+    """Limit inference amount.
+
+    Limit inference amount to help with performance issues with
+    exponentially exploding possible results.
+
+    :param iterator: Inference generator to limit
+    :type iterator: Iterator(NodeNG)
+
+    :param size: Maximum mount of nodes yielded plus an
+        Uninferable at the end if limit reached
+    :type size: int
+
+    :yields: A possibly modified generator
+    :rtype param: Iterable
+    """
+    yield from islice(iterator, size)
+    has_more = next(iterator, False)
+    if has_more is not False:
+        yield Uninferable
+        return
